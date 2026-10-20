@@ -152,7 +152,7 @@ pi-ai adapter → OpenAI SDK → globalThis.fetch
 ## 验证
 
 ```powershell
-node --test dsh-cline/test          # 30 个纯函数 / 拦截器单测
+node --test dsh-cline/test          # 31 个纯函数 / 拦截器单测
 node dsh-cline/tools/live-probe.mjs # 实网：判管道、枚举、钉住、流式、direct 管道
 node dsh-cline/tools/live-interceptor.mjs [model] [a,b]  # 实网：走真实拦截链路
 ```
@@ -174,6 +174,19 @@ node dsh-cline/tools/live-interceptor.mjs [model] [a,b]  # 实网：走真实拦
 - 共享池限流是瞬时的：`⏳限流` 过一会儿重新「校验」即可。
 - 探测/校验/测试会产生极小真实请求（每次约 $0.0002 量级）；**枚举渠道本身零 token**。
 - 管道归属由 Cline 侧决定，可能随时间变化，重新「探测渠道」即可刷新。
+
+## 常见问题
+
+**面板显示「请求失败」或一直「加载中」？**
+桌面版的页面是 `file://`，插件按 `globalThis.__DSH_TRANSPORT__.streamBaseUrl` 解析 Host 源，Host 侧对
+`Origin: null` / `file://` / 回环来源放行并返回 CORS 头。如果仍失败，用浏览器或 PowerShell 打开
+`GET /dsh-cline/diag` 看 `interceptor` 与 `lastInterceptError`。
+
+**装了新版本但界面没变？**
+客户端 bundle 是随页面加载的：改完要刷新页面（Ctrl+R）；Host 侧代码改动需要完全退出并重启 Harness。
+
+**能钉住但面板没有渠道？**
+先点「探测渠道」。渠道清单来自网关的假上游报错（零 token），若网关改了文案会解析失败，`/diag` 里能看到网关请求计数。
 
 ## License
 
