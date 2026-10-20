@@ -29,7 +29,7 @@ import {
 } from './core.js'
 
 const PKG = 'dsh-cline'
-const VERSION = '1.2.0'
+const VERSION = '1.3.0'
 const API_PREFIX = '/dsh-cline'
 const OR_API = 'https://openrouter.ai/api/v1'
 
@@ -59,6 +59,12 @@ const DEFAULTS = {
   debug: false,
 }
 
+// OpenAI-style inference endpoints whose body carries the gateway routing
+// preferences. Any other POST with a matching model is observed but not
+// rewritten, because injecting `provider`/`providerOptions` into an unknown
+// protocol could be rejected.
+const DEFAULT_INJECT_PATHS = ['/chat/completions', '/responses', '/completions']
+
 function normalizeConfig(raw) {
   const input = raw && typeof raw === 'object' ? raw : {}
   const gatewayBase = String(input.gatewayBase || DEFAULTS.gatewayBase).replace(/\/+$/, '')
@@ -72,12 +78,16 @@ function normalizeConfig(raw) {
     origin = ''
     basePath = ''
   }
+  const injectPaths = (Array.isArray(input.injectPaths) ? input.injectPaths : DEFAULT_INJECT_PATHS)
+    .map((value) => String(value || '').trim())
+    .filter((value) => value.startsWith('/'))
   return {
     enabled: input.enabled !== false,
     gatewayBase,
     gatewayOrigin: origin,
     gatewayPath: basePath,
     chatUrl: `${gatewayBase}/chat/completions`,
+    injectPaths: injectPaths.length ? injectPaths : DEFAULT_INJECT_PATHS,
     apiKeyEnv: String(input.apiKeyEnv || DEFAULTS.apiKeyEnv),
     modelPrefix: String(input.modelPrefix || DEFAULTS.modelPrefix),
     llmProvider: String(input.llmProvider || DEFAULTS.llmProvider),
@@ -233,8 +243,12 @@ function matchesGateway(request, config) {
   }
   if (url.origin !== config.gatewayOrigin) return false
   if (!url.pathname.startsWith(`${config.gatewayPath}/`)) return false
-  if (!url.pathname.endsWith('/chat/completions')) return false
   return true
+}
+
+/** OpenAI-style inference path whose body accepts the routing preferences. */
+function isInjectablePath(pathname, config) {
+  return (config.injectPaths || []).some((suffix) => pathname.endsWith(suffix))
 }
 
 function abortable(signal, timeoutMs) {
@@ -448,6 +462,23 @@ async function proxyRequest(previous, request, bodyObject, state, config, ctx) {
   diagnostics.gatewayRequests += 1
   const authorization = request.headers.get('authorization')
   if (authorization) capturedAuth = authorization.replace(/^Bearer\s+/i, '').trim()
+
+  let pathname = ''
+  try {
+    pathname = new URL(request.url).pathname
+  } catch {
+    return previous(request.input, request.init)
+  }
+
+  // Non-OpenAI protocols (an anthropic-messages route, a discovery call, ...)
+  // are passed through byte-for-byte. We still read the routing metadata so the
+  // panel can report what actually served the request.
+  if (!isInjectablePath(pathname, config)) {
+    const started = Date.now()
+    const response = await previous(request.input, request.init)
+    tapResponse(response, modelId, state, config, started, [])
+    return response
+  }
 
   const meta = state.model(modelId)
   const attempts = buildAttempts(meta.cfg)
@@ -1064,6 +1095,7 @@ function registerRoutes(ctx, state, config) {
           config: {
             gatewayBase: config.gatewayBase,
             modelPrefix: config.modelPrefix,
+            injectPaths: config.injectPaths,
             llmProvider: config.llmProvider,
             allowRemote: config.allowRemote,
           },

@@ -53,7 +53,7 @@ dsh plugin --profile desktop add github:MARYCOMPLEX/dsh-cline
 也可以锁定版本或分支：
 
 ```powershell
-dsh plugin --profile desktop add github:MARYCOMPLEX/dsh-cline#v1.2.0
+dsh plugin --profile desktop add github:MARYCOMPLEX/dsh-cline#v1.3.0
 ```
 
 更新到最新：
@@ -87,6 +87,29 @@ dsh plugin --profile desktop remove dsh-cline
 
 聊天时插件自动记录：管道、实际渠道、规范模型、耗时、尝试序列（最近 50 条）。面板每 4 秒刷新一次，页面隐藏时暂停。
 
+### 匹配范围（哪些请求会被改写）
+
+一次请求只有同时满足下面三条才会被**改写**：
+
+1. `POST` 且 JSON body 里有 `model`；
+2. URL 的 origin 等于 `gatewayBase` 的 origin（默认 `https://api.cline.bot`）；
+3. `model` 以 `modelPrefix` 开头（默认 `cline-pass/`）；
+4. 路径命中 `injectPaths`（默认 `/chat/completions`、`/responses`、`/completions`）。
+
+第 4 条是**注入**的范围，不是「观察」的范围：其他路径（比如 `anthropic-messages` 的 `/messages`、模型发现 `/models`）会原样透传，
+但插件仍会尝试回读响应里的路由元数据，用于「最近实际渠道」。原因是 `provider` / `providerOptions.gateway` 是
+OpenAI 兼容网关的字段，往未知协议里塞字段可能被网关判为 400。
+
+`injectPaths` 可以按需扩大或收窄，例如只钉 Chat Completions：
+
+```yaml
+config:
+  injectPaths:
+    - /chat/completions
+```
+
+如果网关把推理端点放在别的前缀下（比如 `/api/v1/responses`），`endsWith` 匹配同样成立。
+
 ---
 
 ## 配置
@@ -97,6 +120,7 @@ dsh plugin --profile desktop remove dsh-cline
 |---|---|---|
 | `enabled` | `true` | 总开关；关闭后请求完全透传 |
 | `gatewayBase` | `https://api.cline.bot/api/v1` | 网关地址 |
+| `injectPaths` | `['/chat/completions','/responses','/completions']` | 允许注入路由字段的路径后缀 |
 | `apiKeyEnv` | `CLINE_API_KEY` | 探测/校验用的凭据引用；优先走 `ctx.credentials`，其次用拦截到的 `Authorization`（仅内存），最后读环境变量 |
 | `modelPrefix` | `cline-pass/` | 只处理这个前缀的模型 |
 | `llmProvider` | `cline` | 拉取模型清单用的 provider 路由名 |
@@ -152,7 +176,7 @@ pi-ai adapter → OpenAI SDK → globalThis.fetch
 ## 验证
 
 ```powershell
-node --test dsh-cline/test          # 31 个纯函数 / 拦截器单测
+node --test dsh-cline/test          # 36 个纯函数 / 拦截器单测
 node dsh-cline/tools/live-probe.mjs # 实网：判管道、枚举、钉住、流式、direct 管道
 node dsh-cline/tools/live-interceptor.mjs [model] [a,b]  # 实网：走真实拦截链路
 ```

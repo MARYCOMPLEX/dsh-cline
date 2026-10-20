@@ -94,6 +94,40 @@ test('planner strict injects providerOptions.gateway.only', async () => {
   assert.equal(calls[0].body.provider, undefined)
 })
 
+test('the same rules apply to the Responses endpoint', async () => {
+  const meta = model({ cfg: { upstreams: ['alibaba'], exclude: [], pinMode: 'strict', sort: null } })
+  const { calls } = await withInterceptor(meta, () => globalThis.fetch(`${GATEWAY}/responses`, chatInit(baseBody)))
+  assert.deepEqual(calls[0].body.providerOptions.gateway.only, ['alibaba'])
+})
+
+test('unknown protocols are observed but never rewritten', async () => {
+  const meta = model({ cfg: { upstreams: ['alibaba'], exclude: [], pinMode: 'strict', sort: null } })
+  const { calls } = await withInterceptor(meta, () => globalThis.fetch(`${GATEWAY}/messages`, chatInit(baseBody)))
+  assert.deepEqual(calls[0].body, baseBody)
+})
+
+test('injectPaths can be narrowed or widened by configuration', async () => {
+  const custom = normalizeConfig({ gatewayBase: GATEWAY, apiKeyEnv: 'TEST_KEY', injectPaths: ['/messages'] })
+  const meta = model({ cfg: { upstreams: ['alibaba'], exclude: [], pinMode: 'strict', sort: null } })
+  const previous = globalThis.fetch
+  const calls = []
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), body: JSON.parse(init.body) })
+    return plannerResponse()
+  }
+  const state = fakeState(meta)
+  const dispose = installFetch({ logger: { info() {}, warn() {} } }, state, custom)
+  try {
+    await globalThis.fetch(`${GATEWAY}/messages`, chatInit(baseBody))
+    await globalThis.fetch(`${GATEWAY}/chat/completions`, chatInit(baseBody))
+  } finally {
+    dispose()
+    globalThis.fetch = previous
+  }
+  assert.deepEqual(calls[0].body.providerOptions.gateway.only, ['alibaba'])
+  assert.deepEqual(calls[1].body, baseBody)
+})
+
 test('planner preferred injects an order and an exclusion whitelist', async () => {
   const meta = model({
     upstreams: ['alibaba', 'baseten', 'deepinfra'],
