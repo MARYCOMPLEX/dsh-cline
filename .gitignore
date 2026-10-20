@@ -1,0 +1,7 @@
+node_modules/
+tools/ssr/node_modules/
+tools/ssr/pnpm-lock.yaml
+tools/.runtime-home/
+tools/profile-backup/
+tools/*.png
+*.log

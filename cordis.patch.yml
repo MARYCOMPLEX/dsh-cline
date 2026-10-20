@@ -1,0 +1,8 @@
+- insert:
+    - id: dsh-cline
+      name: dsh-cline
+      config:
+        enabled: true
+        gatewayBase: https://api.cline.bot/api/v1
+        apiKeyEnv: CLINE_API_KEY
+        modelPrefix: cline-pass/
