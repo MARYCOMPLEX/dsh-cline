@@ -30,7 +30,7 @@ import {
 } from './core.js'
 
 const PKG = 'dsh-cline'
-const VERSION = '1.4.0'
+const VERSION = '1.4.1'
 const API_PREFIX = '/dsh-cline'
 const OR_API = 'https://openrouter.ai/api/v1'
 
@@ -224,6 +224,15 @@ class LogBook {
   clear() {
     this.entries = []
   }
+
+  /**
+   * Newest entry, optionally scoped to one session. Unattributed entries stay
+   * eligible because the Host cannot always see a session id on the wire.
+   */
+  latest(session = null) {
+    if (!session) return this.entries[0] || null
+    return this.entries.find((entry) => !entry.session || entry.session === session) || null
+  }
 }
 
 const logBook = new LogBook(200)
@@ -250,6 +259,20 @@ function providerFromUrl(url) {
   } catch {
     return 'unknown'
   }
+}
+
+// Session affinity headers are only sent by adapters that enable them, so this
+// is best-effort attribution: absent ids leave the entry unscoped rather than
+// guessing which conversation it belongs to.
+const SESSION_HEADERS = ['x-session-affinity', 'x-client-request-id', 'x-session-id', 'session_id']
+
+function sessionOf(request, body) {
+  for (const name of SESSION_HEADERS) {
+    const value = request.headers.get(name)
+    if (value) return value
+  }
+  const fromBody = body && (body.session_id || (body.metadata && body.metadata.session_id))
+  return typeof fromBody === 'string' && fromBody ? fromBody : null
 }
 
 function isLlmRequest(request) {
@@ -557,7 +580,7 @@ function pushHistory(meta, item, limit) {
   meta.history = [item, ...(meta.history || [])].slice(0, limit)
 }
 
-function tapResponse(response, modelId, state, config, started, trace) {
+function tapResponse(response, modelId, state, config, started, trace, session = null) {
   let clone
   try {
     clone = response.clone()
@@ -601,6 +624,7 @@ function tapResponse(response, modelId, state, config, started, trace) {
         canonical: last.canonical,
         target: last.target,
         attempts: last.attempts,
+        session,
         error: null,
       })
       state.save()
@@ -608,7 +632,7 @@ function tapResponse(response, modelId, state, config, started, trace) {
     .catch(() => {})
 }
 
-function pushClineFailure(modelId, started, trace, status, error) {
+function pushClineFailure(modelId, started, trace, status, error, session = null) {
   logBook.push({
     provider: 'cline',
     model: modelId,
@@ -620,23 +644,28 @@ function pushClineFailure(modelId, started, trace, status, error) {
     upstream: null,
     target: trace[trace.length - 1]?.upstream || null,
     attempts: trace.map((item) => item.upstream || 'auto'),
+    session,
     error: String(error || '').slice(0, 300) || null,
   })
 }
 
-function tapGeneric(response, request, started) {
+function tapGeneric(response, request, started, parsed = null) {
   let clone
   try {
     clone = response.clone()
   } catch {
     return
   }
-  let requestedModel = ''
-  try {
-    requestedModel = String(JSON.parse(request.body).model || '')
-  } catch {
-    // keep empty
+  let body = parsed
+  if (body === null) {
+    try {
+      body = JSON.parse(request.body)
+    } catch {
+      body = null
+    }
   }
+  const requestedModel = String(body?.model || '')
+  const session = sessionOf(request, body)
   let endpoint = ''
   try {
     endpoint = new URL(request.url).pathname
@@ -676,6 +705,7 @@ function tapGeneric(response, request, started) {
         upstream,
         requestId: extractRequestId(response, info.json),
         usage: info.usage || null,
+        session,
         error: info.error || (response.ok ? null : `HTTP ${response.status}`),
       })
     })
@@ -683,21 +713,21 @@ function tapGeneric(response, request, started) {
 }
 
 async function observeGeneric(previous, request, started) {
+  let body = null
+  try {
+    body = JSON.parse(request.body)
+  } catch {
+    body = null
+  }
   try {
     const response = await previous(request.input, request.init)
-    tapGeneric(response, request, started)
+    tapGeneric(response, request, started, body)
     return response
   } catch (error) {
-    let requestedModel = ''
-    try {
-      requestedModel = String(JSON.parse(request.body).model || '')
-    } catch {
-      // keep empty
-    }
     logBook.push({
       provider: providerFromUrl(request.url),
-      model: requestedModel,
-      requestedModel,
+      model: String(body?.model || ''),
+      requestedModel: String(body?.model || ''),
       endpoint: (() => {
         try {
           return new URL(request.url).pathname
@@ -709,6 +739,7 @@ async function observeGeneric(previous, request, started) {
       ms: Date.now() - started,
       stream: false,
       upstream: null,
+      session: sessionOf(request, body),
       error: String(error?.message || error).slice(0, 300),
     })
     throw error
@@ -736,10 +767,11 @@ async function proxyRequest(previous, request, bodyObject, state, config, ctx) {
   if (!isInjectablePath(pathname, config)) {
     const started = Date.now()
     const response = await previous(request.input, request.init)
-    tapResponse(response, modelId, state, config, started, [])
+    tapResponse(response, modelId, state, config, started, [], sessionOf(request, bodyObject))
     return response
   }
 
+  const session = sessionOf(request, bodyObject)
   const meta = state.model(modelId)
   const attempts = buildAttempts(meta.cfg)
   const started = Date.now()
@@ -776,7 +808,7 @@ async function proxyRequest(previous, request, bodyObject, state, config, ctx) {
           target: attempt.upstream || null,
           error: message.slice(0, 300),
         }
-        pushClineFailure(modelId, started, trace, 0, message)
+        pushClineFailure(modelId, started, trace, 0, message, session)
         state.save()
         return new Response(
           JSON.stringify({ error: { message: `upstream fetch failed: ${message}`, type: 'upstream_error' } }),
@@ -810,7 +842,7 @@ async function proxyRequest(previous, request, bodyObject, state, config, ctx) {
                 error: peek.message.slice(0, 300),
               },
             })
-            pushClineFailure(modelId, started, trace, 502, peek.message)
+            pushClineFailure(modelId, started, trace, 502, peek.message, session)
             return new Response(
               JSON.stringify({ error: { message: peek.message, type: 'upstream_error' } }),
               { status: 502, headers: { 'content-type': 'application/json' } },
@@ -820,7 +852,7 @@ async function proxyRequest(previous, request, bodyObject, state, config, ctx) {
         }
         if (peek.kind === 'ok') {
           const rebuilt = rebuildStream(peek.head, peek.reader, response)
-          tapResponse(rebuilt, modelId, state, config, started, trace)
+          tapResponse(rebuilt, modelId, state, config, started, trace, session)
           return rebuilt
         }
         // Empty stream: treat it as a failure and try the next channel.
@@ -839,7 +871,7 @@ async function proxyRequest(previous, request, bodyObject, state, config, ctx) {
               error: 'empty stream',
             },
           })
-          pushClineFailure(modelId, started, trace, 502, 'empty stream')
+          pushClineFailure(modelId, started, trace, 502, 'empty stream', session)
           return new Response(
             JSON.stringify({ error: { message: 'upstream returned an empty stream', type: 'upstream_error' } }),
             { status: 502, headers: { 'content-type': 'application/json' } },
@@ -847,7 +879,7 @@ async function proxyRequest(previous, request, bodyObject, state, config, ctx) {
         }
         continue
       }
-      tapResponse(response, modelId, state, config, started, trace)
+      tapResponse(response, modelId, state, config, started, trace, session)
       return response
     }
 
@@ -870,7 +902,7 @@ async function proxyRequest(previous, request, bodyObject, state, config, ctx) {
           error: text.slice(0, 300),
         },
       })
-      pushClineFailure(modelId, started, trace, response.status, text)
+      pushClineFailure(modelId, started, trace, response.status, text, session)
       return rebuildResponse(text, response)
     }
   }
@@ -1358,12 +1390,16 @@ function registerRoutes(ctx, state, config) {
       }
 
       if (request.method === 'GET' && action === 'status') {
-        const cline = logBook.entries.find((entry) => entry.provider === 'cline') || null
+        // The newest call wins, whoever served it: reporting the newest Cline
+        // call instead would show a stale channel whenever the current model
+        // is routed elsewhere.
+        const session = url.searchParams.get('session')
+        const last = logBook.latest(session)
         return sendJSON(response, 200, {
           ok: true,
           enabled: state.enabled(config),
           interceptor: diagnostics.interceptor,
-          last: cline || logBook.entries[0] || null,
+          last,
           total: logBook.entries.length,
         })
       }

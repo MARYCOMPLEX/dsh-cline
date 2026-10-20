@@ -53,7 +53,7 @@ dsh plugin --profile desktop add github:MARYCOMPLEX/dsh-cline
 也可以锁定版本或分支：
 
 ```powershell
-dsh plugin --profile desktop add github:MARYCOMPLEX/dsh-cline#v1.4.0
+dsh plugin --profile desktop add github:MARYCOMPLEX/dsh-cline#v1.4.1
 ```
 
 更新到最新：
@@ -149,6 +149,19 @@ config:
 - **设置 → 模型 → Cline 上游 → 网关请求日志**：可筛选「全部 / 仅 Cline / 仅失败」，支持清空；
 - **输入框下方的状态条**：新增一个 `上游 <渠道>` 小胶囊，5 秒刷新，绿色=命中目标、黄色=实际与目标不同、红色=失败。点开设置页可看完整日志。
 
+胶囊的取值规则（1.4.1 起）：
+
+| 情况 | 显示 |
+|---|---|
+| 最近一次请求有 `upstream` | `上游 alibaba`（绿勾同色圆点） |
+| 最近一次请求走的是别的提供商 | `经 cpa.gojia.cloud`，不再冒用上一条 Cline 的渠道 |
+| Cline 请求但响应没有路由字段（失败/空流） | `上游 未解析` |
+| 当前对话还没有发过请求 | 不显示 |
+
+**为什么切换对话会清空**：胶囊是 `conversation.composer.dock` 的 session 作用域插槽，切换会话时组件状态与 `sessionId` 一起重置；
+只有「本对话切过来之后到达」的请求才会被采纳（Host 能识别 `x-session-affinity` 等会话头时会精确匹配，识别不到
+时退回时间窗判断）。因此不会再把上一个对话的渠道显示到新对话里。
+
 > 日志是观测层：即使不钉任何渠道、甚至换成别家 provider，也会出现在日志里；只有 Cline 的行会带「实际上游」。
 
 ---
@@ -198,7 +211,7 @@ pi-ai adapter → OpenAI SDK → globalThis.fetch
 ## 验证
 
 ```powershell
-node --test dsh-cline/test          # 40 个纯函数 / 拦截器 / 日志单测
+node --test dsh-cline/test          # 44 个纯函数 / 拦截器 / 日志单测
 node dsh-cline/tools/live-probe.mjs # 实网：判管道、枚举、钉住、流式、direct 管道
 node dsh-cline/tools/live-interceptor.mjs [model] [a,b]  # 实网：走真实拦截链路
 ```

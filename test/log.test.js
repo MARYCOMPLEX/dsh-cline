@@ -91,3 +91,42 @@ test('logBook filters by provider and errors', () => {
   assert.equal(__test.logBook.list({ onlyErrors: '1' }).length, 1)
   assert.equal(__test.logBook.list({ provider: 'deepseek' }).length, 1)
 })
+
+test('the current call wins over an older Cline call with a channel', () => {
+  __test.logBook.clear()
+  __test.logBook.push({ provider: 'cline', model: 'a', upstream: 'deepseek', status: 200 })
+  __test.logBook.push({ provider: 'cpa.gojia.cloud', model: 'c', upstream: null, status: 200 })
+  const last = __test.logBook.latest()
+  assert.equal(last.provider, 'cpa.gojia.cloud')
+  assert.equal(last.upstream, null)
+})
+
+test('latest() scopes to a session and skips other sessions', () => {
+  __test.logBook.clear()
+  __test.logBook.push({ provider: 'cline', model: 'a', upstream: 'alibaba', session: 's1' })
+  __test.logBook.push({ provider: 'cline', model: 'a', upstream: 'baseten', session: 's2' })
+  assert.equal(__test.logBook.latest('s1').upstream, 'alibaba')
+  assert.equal(__test.logBook.latest('s2').upstream, 'baseten')
+  assert.equal(__test.logBook.latest('s3'), null)
+})
+
+test('unattributed entries stay visible to every session', () => {
+  __test.logBook.clear()
+  __test.logBook.push({ provider: 'cline', model: 'a', upstream: 'alibaba' })
+  assert.equal(__test.logBook.latest('s9').upstream, 'alibaba')
+})
+
+test('session affinity headers tag the log entry', async () => {
+  __test.logBook.clear()
+  const fake = async () => jsonResponse({ model: 'deepseek-chat', usage: { total_tokens: 3 } })
+  await withFetch(fake, async () => {
+    await globalThis.fetch('https://api.deepseek.com/chat/completions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-session-affinity': 'sess-42' },
+      body: JSON.stringify({ model: 'deepseek-chat', messages: [] }),
+    })
+    await new Promise((resolve) => setTimeout(resolve, 60))
+  })
+  const [entry] = __test.logBook.list({ limit: 1 })
+  assert.equal(entry.session, 'sess-42')
+})

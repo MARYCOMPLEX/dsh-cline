@@ -534,16 +534,42 @@ window.__ModuleLoader__.load({
       )
     }
 
-    function UpstreamPill() {
-      const [status, setStatus] = React.useState(null)
+    // Per-session memory: the pill is a session-scoped slot, so its reading must
+    // never be inherited from the conversation the user just left.
+    const upstreamMemory = new Map()
+
+    function UpstreamPill(props) {
+      const sessionId = props && typeof props.sessionId === 'string' ? props.sessionId : null
+      const mountedAt = React.useRef(Date.now())
+      const [entry, setEntry] = React.useState(sessionId ? upstreamMemory.get(sessionId) || null : null)
+      const [enabled, setEnabled] = React.useState(true)
+
+      // A conversation switch must clear the reading immediately, before the
+      // next poll can arrive; otherwise the previous channel lingers.
+      React.useEffect(() => {
+        mountedAt.current = Date.now()
+        setEntry(sessionId ? upstreamMemory.get(sessionId) || null : null)
+      }, [sessionId])
+
       React.useEffect(() => {
         let alive = true
         let timer = null
         const tick = async () => {
           try {
-            const response = await fetch(apiURL('/status'), { headers: { accept: 'application/json' } })
+            const query = sessionId ? `?session=${encodeURIComponent(sessionId)}` : ''
+            const response = await fetch(apiURL(`/status${query}`), { headers: { accept: 'application/json' } })
             const json = await response.json()
-            if (alive) setStatus(json)
+            if (!alive) return
+            setEnabled(json.enabled !== false)
+            const candidate = json.last || null
+            // A Host-attributed entry belongs to exactly one session; an
+            // unattributed one is only adopted when it arrived while this
+            // conversation was on screen.
+            const owned = candidate
+              && (candidate.session ? candidate.session === sessionId : candidate.at >= mountedAt.current)
+            if (!owned) return
+            if (sessionId) upstreamMemory.set(sessionId, candidate)
+            setEntry(candidate)
           } catch {
             // The Host may be starting; retry on the next tick.
           }
@@ -554,19 +580,35 @@ window.__ModuleLoader__.load({
           alive = false
           if (timer) clearTimeout(timer)
         }
-      }, [])
-      if (!status || status.enabled === false || !status.last) return null
-      const entry = status.last
-      const label = entry.upstream || entry.provider || '—'
-      const mismatch = entry.target && entry.upstream && entry.target !== entry.upstream
+      }, [sessionId])
+
+      if (!enabled || !entry) return null
+      const upstream = entry.upstream || null
+      const mismatch = !!(entry.target && upstream && entry.target !== upstream)
       const color = entry.error
         ? 'var(--dsw-alias-state-error-primary, #d92d20)'
         : mismatch
           ? 'var(--dsw-alias-state-warn-primary, #b54708)'
           : 'var(--dsw-alias-state-success-primary, #22c55e)'
       const zh = langFromStorage() === 'zh'
+      // Never present a provider name as if it were a resolved upstream: when
+      // the response carried no routing attribution the field stays unknown.
+      const label = upstream
+        ? `${zh ? '上游' : 'upstream'} ${upstream}`
+        : entry.provider && entry.provider !== 'cline'
+          ? `${zh ? '经' : 'via'} ${entry.provider}`
+          : `${zh ? '上游' : 'upstream'} ${zh ? '未解析' : 'n/a'}`
+      const detail = [
+        entry.model || entry.requestedModel || '',
+        `provider: ${entry.provider || '—'}`,
+        `upstream: ${upstream || '—'}`,
+        entry.target ? `target: ${entry.target}` : '',
+        entry.status ? `status: ${entry.status}` : 'status: ERR',
+        entry.ms ? `${entry.ms} ms` : '',
+        entry.error ? `error: ${entry.error}` : '',
+      ].filter(Boolean).join('\n')
       return h('span', {
-        title: `${entry.model || ''} · ${entry.provider || ''}${entry.upstream ? ` · ${entry.upstream}` : ''} · ${entry.ms || 0} ms`,
+        title: detail,
         style: {
           display: 'inline-flex',
           alignItems: 'center',
@@ -580,7 +622,7 @@ window.__ModuleLoader__.load({
         },
       },
       h('span', { style: { width: 6, height: 6, borderRadius: '50%', background: color, flex: 'none' } }),
-      `${zh ? '上游' : 'upstream'} ${label}`)
+      label)
     }
 
     function Panel(props) {
