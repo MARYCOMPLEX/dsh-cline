@@ -146,6 +146,20 @@ test('buildAttempts mirrors strict and preferred semantics', () => {
   assert.deepEqual(auto[0].excludeList, ['c'])
 })
 
+test('explicit auto mode ignores leftover pins', () => {
+  const attempts = buildAttempts({ upstreams: ['a'], pinMode: 'auto' })
+  assert.equal(attempts.length, 1)
+  assert.equal(attempts[0].upstream, null)
+})
+
+test('strict mode without a chosen channel still reports strict', () => {
+  const attempts = buildAttempts({ pinMode: 'strict' })
+  assert.equal(attempts.length, 1)
+  assert.equal(attempts[0].upstream, null)
+  assert.equal(normalizeModelConfig({ pinMode: 'strict' }).pinMode, 'strict')
+  assert.equal(normalizeModelConfig({}).pinMode, 'auto')
+})
+
 test('pinBody picks the field family from the pipeline', () => {
   assert.deepEqual(pinBody('m', 'planner', 'a').providerOptions.gateway.only, ['a'])
   assert.deepEqual(pinBody('m', 'direct', 'a').provider.only, ['a'])

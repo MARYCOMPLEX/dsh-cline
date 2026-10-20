@@ -69,6 +69,7 @@ if (!registration) throw new Error('no slot registration captured')
 const fixture = {
   ok: true,
   gateway: 'https://api.cline.bot/api/v1',
+  modelPrefix: 'cline-pass/',
   apiKeyEnv: 'CLINE_API_KEY',
   enabled: true,
   apiKeyConfigured: true,
@@ -118,6 +119,36 @@ const checks = {
   summary: html.includes('dc-stat'),
 }
 console.log(JSON.stringify(checks, null, 2))
+
+// Mode tabs must reflect the stored pinMode even with no channel chosen.
+const strictOnly = {
+  ...fixture,
+  models: [{
+    ...fixture.models[0],
+    cfg: { upstreams: [], exclude: [], pinMode: 'strict', sort: null },
+  }],
+}
+const strictHtml = renderToString(React.createElement(registration.Component, {
+  initialData: strictOnly,
+  initialModel: fixture.models[0].id,
+}))
+const autoOnly = {
+  ...fixture,
+  models: [{
+    ...fixture.models[0],
+    cfg: { upstreams: [], exclude: [], pinMode: 'auto', sort: null },
+  }],
+}
+const autoHtml = renderToString(React.createElement(registration.Component, {
+  initialData: autoOnly,
+  initialModel: fixture.models[0].id,
+}))
+console.log(JSON.stringify({
+  strictTabSelected: /aria-pressed="true"[^>]*>严格钉住/.test(strictHtml),
+  strictHint: strictHtml.includes('还没有钉住渠道'),
+  autoTabSelected: /aria-pressed="true"[^>]*>自动/.test(autoHtml),
+  scopeHint: html.includes('仅拦截') && html.includes('cline-pass/'),
+}, null, 2))
 
 storage.set('dsh-cline.lang', 'en')
 const english = renderToString(React.createElement(registration.Component, {

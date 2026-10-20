@@ -53,7 +53,7 @@ dsh plugin --profile desktop add github:MARYCOMPLEX/dsh-cline
 也可以锁定版本或分支：
 
 ```powershell
-dsh plugin --profile desktop add github:MARYCOMPLEX/dsh-cline#v1.1.0
+dsh plugin --profile desktop add github:MARYCOMPLEX/dsh-cline#v1.2.0
 ```
 
 更新到最新：
@@ -184,6 +184,11 @@ node dsh-cline/tools/live-interceptor.mjs [model] [a,b]  # 实网：走真实拦
 
 **装了新版本但界面没变？**
 客户端 bundle 是随页面加载的：改完要刷新页面（Ctrl+R）；Host 侧代码改动需要完全退出并重启 Harness。
+
+**点了「严格钉住」但标签又跳回「自动」？**
+1.2.0 起模式是独立字段：`pinMode: auto | strict | preferred`，不再用「是否已选渠道」推断。
+严格/优先模式可以在还没选渠道时保持选中，并提示去点渠道上的「钉住」。旧版 Host 会把 `auto` 归一成 `strict`，
+所以升级后需要重启一次 Harness 让 Host 侧代码生效。
 
 **能钉住但面板没有渠道？**
 先点「探测渠道」。渠道清单来自网关的假上游报错（零 token），若网关改了文案会解析失败，`/diag` 里能看到网关请求计数。

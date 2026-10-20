@@ -158,14 +158,15 @@ export function classifyUpstreamError(message) {
  * - listed upstreams: one attempt each; strict pins only that channel, preferred
  *   puts it first in `order` and the rest after it.
  * - no listed upstreams: one automatic attempt; exclude becomes an only-whitelist.
- * @param {{upstreams?:string[],exclude?:string[],pinMode?:'strict'|'preferred',sort?:string|null}} cfg
+ * @param {{upstreams?:string[],exclude?:string[],pinMode?:'auto'|'strict'|'preferred',sort?:string|null}} cfg
  */
 export function buildAttempts(cfg = {}) {
   const exclude = normalizeSlugs(cfg.exclude)
   const listed = normalizeSlugs(cfg.upstreams).filter((upstream) => !exclude.includes(upstream))
-  const strict = (cfg.pinMode || 'strict') !== 'preferred'
+  const mode = cfg.pinMode || (listed.length ? 'strict' : 'auto')
+  const strict = mode !== 'preferred'
   const sort = cfg.sort || null
-  if (listed.length) {
+  if (mode !== 'auto' && listed.length) {
     return listed.map((upstream, index) => ({
       upstream,
       strict,
@@ -298,10 +299,15 @@ export function parseSSEProvider(text) {
 export function normalizeModelConfig(input = {}) {
   const exclude = normalizeSlugs(input.exclude).slice(0, 10)
   const upstreams = normalizeSlugs(input.upstreams).filter((value) => !exclude.includes(value)).slice(0, 10)
+  const pinMode = input.pinMode === 'preferred'
+    ? 'preferred'
+    : input.pinMode === 'strict'
+      ? 'strict'
+      : 'auto'
   return {
     upstreams,
     exclude,
-    pinMode: input.pinMode === 'preferred' ? 'preferred' : 'strict',
+    pinMode,
     sort: ['cost', 'ttft', 'tps'].includes(input.sort) ? input.sort : null,
   }
 }

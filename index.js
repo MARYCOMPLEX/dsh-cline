@@ -29,6 +29,7 @@ import {
 } from './core.js'
 
 const PKG = 'dsh-cline'
+const VERSION = '1.2.0'
 const API_PREFIX = '/dsh-cline'
 const OR_API = 'https://openrouter.ai/api/v1'
 
@@ -920,6 +921,7 @@ async function stateResponse(ctx, state, config) {
   return {
     ok: true,
     gateway: config.gatewayBase,
+    modelPrefix: config.modelPrefix,
     apiKeyEnv: config.apiKeyEnv,
     enabled: state.enabled(config),
     apiKeyConfigured: await credentialConfigured(ctx, state, config),
@@ -1050,6 +1052,7 @@ function registerRoutes(ctx, state, config) {
       if (request.method === 'GET' && action === 'diag') {
         return sendJSON(response, 200, {
           ok: true,
+          version: VERSION,
           interceptor: diagnostics.interceptor,
           gatewayRequests: diagnostics.gatewayRequests,
           intercepted: diagnostics.intercepted,

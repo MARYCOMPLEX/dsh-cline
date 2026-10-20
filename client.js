@@ -72,6 +72,7 @@ window.__ModuleLoader__.load({
         sortTps: '最高吞吐',
         pinnedOrder: '钉住顺序',
         noPinned: '当前为自动模式，未钉住任何渠道。',
+        noChannelPinned: '已选择该模式，但还没有钉住渠道；点下方渠道行的「钉住」。',
         pin: '钉住',
         pinned: '已钉住',
         unpin: '取消钉住',
@@ -99,6 +100,7 @@ window.__ModuleLoader__.load({
         diagHint: '诊断接口',
         disabledHint: '插件已停用：所有请求按原生方式透传，不会注入任何字段。',
         probeCost: '「探测」会产生一条极小的真实请求；枚举渠道本身零 token。',
+        scopeHint: '仅拦截',
         statusOk: '可用',
         statusLimited: '限流',
         statusBad: '不可钉',
@@ -165,6 +167,7 @@ window.__ModuleLoader__.load({
         sortTps: 'Highest throughput',
         pinnedOrder: 'Pinned order',
         noPinned: 'Automatic mode: no channel is pinned.',
+        noChannelPinned: 'The mode is selected but no channel is pinned yet; press Pin on a channel below.',
         pin: 'Pin',
         pinned: 'Pinned',
         unpin: 'Unpin',
@@ -192,6 +195,7 @@ window.__ModuleLoader__.load({
         diagHint: 'Diagnostics endpoint',
         disabledHint: 'Plugin disabled: every request passes through unchanged.',
         probeCost: 'Probing sends one tiny real completion; enumerating channels itself costs zero tokens.',
+        scopeHint: 'intercepts only',
         statusOk: 'available',
         statusLimited: 'rate-limited',
         statusBad: 'not pinnable',
@@ -370,7 +374,7 @@ window.__ModuleLoader__.load({
         pipeline: null,
         canonicalSlug: null,
         upstreams: [],
-        cfg: { upstreams: [], exclude: [], pinMode: 'strict', sort: null },
+        cfg: { upstreams: [], exclude: [], pinMode: 'auto', sort: null },
         last: null,
         history: [],
         requests: 0,
@@ -386,7 +390,7 @@ window.__ModuleLoader__.load({
       return {
         upstreams: Array.isArray(cfg.upstreams) ? cfg.upstreams : [],
         exclude: Array.isArray(cfg.exclude) ? cfg.exclude : [],
-        pinMode: cfg.pinMode === 'preferred' ? 'preferred' : 'strict',
+        pinMode: cfg.pinMode === 'preferred' ? 'preferred' : cfg.pinMode === 'auto' ? 'auto' : 'strict',
         sort: ['cost', 'ttft', 'tps'].includes(cfg.sort) ? cfg.sort : null,
       }
     }
@@ -633,13 +637,14 @@ window.__ModuleLoader__.load({
         if (!current) return
         const cfg = current.cfg
         const pinned = cfg.upstreams.includes(slug)
+        const mode = cfg.pinMode === 'auto' ? 'strict' : cfg.pinMode
         let upstreams
         if (pinned) upstreams = cfg.upstreams.filter((value) => value !== slug)
-        else if (cfg.pinMode === 'preferred') upstreams = [...cfg.upstreams, slug]
+        else if (mode === 'preferred') upstreams = [...cfg.upstreams, slug]
         else upstreams = [slug]
         const exclude = cfg.exclude.filter((value) => value !== slug)
-        const modeName = cfg.pinMode === 'preferred' ? t.modePreferred : t.modeStrict
-        save({ upstreams, exclude }, pinned ? `${t.unpin}: ${slug}` : `${t.pinned}: ${slug} · ${modeName}`)
+        const modeName = mode === 'preferred' ? t.modePreferred : t.modeStrict
+        save({ upstreams, exclude, pinMode: mode }, pinned ? `${t.unpin}: ${slug}` : `${t.pinned}: ${slug} · ${modeName}`)
       }
 
       const exclude = (slug) => {
@@ -665,12 +670,12 @@ window.__ModuleLoader__.load({
 
       const clear = () => {
         if (!current) return
-        save({ upstreams: [] }, `${t.saved}: ${t.modeAuto}`)
+        save({ upstreams: [], pinMode: 'auto' }, `${t.saved}: ${t.modeAuto}`)
       }
 
       const setMode = (mode) => {
         if (!current) return
-        if (mode === 'auto') return save({ upstreams: [], pinMode: 'strict' }, `${t.saved}: ${t.modeAuto}`)
+        if (mode === 'auto') return save({ upstreams: [], pinMode: 'auto' }, `${t.saved}: ${t.modeAuto}`)
         return save({ pinMode: mode }, `${t.saved}: ${mode === 'strict' ? t.modeStrict : t.modePreferred}`)
       }
 
@@ -700,7 +705,11 @@ window.__ModuleLoader__.load({
       })
       const last = current && current.last ? current.last : null
       const lastProvider = last && last.provider ? last.provider : null
-      const modeHint = cfg.upstreams.length === 0 ? t.modeAutoHint : cfg.pinMode === 'preferred' ? t.modePreferredHint : t.modeStrictHint
+      const modeHint = cfg.pinMode === 'auto'
+        ? t.modeAutoHint
+        : cfg.pinMode === 'preferred'
+          ? t.modePreferredHint
+          : t.modeStrictHint
 
       const resultOk = result && result.ok === true
       const resultTarget = result && Array.isArray(result.trace) && result.trace.length && result.trace[0].upstream
@@ -804,15 +813,15 @@ window.__ModuleLoader__.load({
                   h('span', { className: 'dc-label' }, t.mode),
                   h('div', { className: 'dc-seg', role: 'group', 'aria-label': t.mode },
                     h('button', {
-                      type: 'button', 'aria-pressed': cfg.upstreams.length === 0,
+                      type: 'button', 'aria-pressed': cfg.pinMode === 'auto',
                       disabled: !!busy, onClick: () => setMode('auto'),
                     }, t.modeAuto),
                     h('button', {
-                      type: 'button', 'aria-pressed': cfg.upstreams.length > 0 && cfg.pinMode === 'strict',
+                      type: 'button', 'aria-pressed': cfg.pinMode === 'strict',
                       disabled: !!busy, onClick: () => setMode('strict'),
                     }, t.modeStrict),
                     h('button', {
-                      type: 'button', 'aria-pressed': cfg.upstreams.length > 0 && cfg.pinMode === 'preferred',
+                      type: 'button', 'aria-pressed': cfg.pinMode === 'preferred',
                       disabled: !!busy, onClick: () => setMode('preferred'),
                     }, t.modePreferred),
                   ),
@@ -832,7 +841,7 @@ window.__ModuleLoader__.load({
                 ),
                 h('div', { className: 'dc-pinned' },
                   cfg.upstreams.length === 0
-                    ? h('span', { className: 'dc-hint' }, t.noPinned)
+                    ? h('span', { className: 'dc-hint' }, cfg.pinMode === 'auto' ? t.noPinned : t.noChannelPinned)
                     : cfg.upstreams.map((slug, index) => h(PinChip, {
                       key: slug, slug, index, total: cfg.upstreams.length, t, busy: !!busy,
                       onMove: move, onRemove: pin,
@@ -885,7 +894,12 @@ window.__ModuleLoader__.load({
               ),
             ),
 
-        h('div', { className: 'dc-footer' }, t.probeCost),
+        h('div', { className: 'dc-footer' },
+          t.probeCost,
+          data && data.gateway && data.modelPrefix
+            ? h('span', null, ` · ${t.scopeHint}: ${data.gateway} · ${data.modelPrefix}*`)
+            : null,
+        ),
       )
     }
 
