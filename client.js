@@ -32,6 +32,27 @@ window.__ModuleLoader__.load({
     h('path', { d: 'M4 7h4.2a3 3 0 0 1 3 3v1.5' }))
     const RouteIcon = (primitives && primitives.IconBranchOutlineRegular) || FallbackRouteIcon
 
+    // A broken seed icon must not take the whole pill (and its slot row) down;
+    // the boundary swaps in the local outline instead.
+    class IconBoundary extends React.Component {
+      constructor(props) {
+        super(props)
+        this.state = { failed: false }
+      }
+
+      static getDerivedStateFromError() {
+        return { failed: true }
+      }
+
+      componentDidCatch() {
+        // The fallback icon is the recovery path; nothing to report.
+      }
+
+      render() {
+        return this.state.failed ? h(FallbackRouteIcon, null) : this.props.children
+      }
+    }
+
     // Match the built-in StatsPills geometry (14px icon, 6px gap, 1px/8px
     // padding, 12px type) so the added pill sits in the same optical rhythm.
     const PILL_CSS = [
@@ -578,20 +599,50 @@ window.__ModuleLoader__.load({
     }
 
     // Per-session memory: the pill is a session-scoped slot, so its reading must
-    // never be inherited from the conversation the user just left.
+    // never be inherited from the conversation the user just left. The same
+    // reading is mirrored into localStorage because a reload remounts the slot
+    // before any new request exists, and an empty bar reads as "broken".
     const upstreamMemory = new Map()
+    const UPSTREAM_STORE = 'dsh-cline.upstream.'
+
+    function readStored(sessionId) {
+      if (!sessionId) return null
+      const cached = upstreamMemory.get(sessionId)
+      if (cached) return cached
+      try {
+        const raw = globalThis.localStorage?.getItem(UPSTREAM_STORE + sessionId)
+        const parsed = raw ? JSON.parse(raw) : null
+        if (parsed && typeof parsed === 'object' && parsed.id) {
+          upstreamMemory.set(sessionId, parsed)
+          return parsed
+        }
+      } catch {
+        // Private mode or a stale value: fall through to a live reading.
+      }
+      return null
+    }
+
+    function storeReading(sessionId, reading) {
+      if (!sessionId) return
+      upstreamMemory.set(sessionId, reading)
+      try {
+        globalThis.localStorage?.setItem(UPSTREAM_STORE + sessionId, JSON.stringify(reading))
+      } catch {
+        // Quota or private mode: the in-memory copy still covers this page.
+      }
+    }
 
     function UpstreamPill(props) {
       const sessionId = props && typeof props.sessionId === 'string' ? props.sessionId : null
       const mountedAt = React.useRef(Date.now())
-      const [entry, setEntry] = React.useState(sessionId ? upstreamMemory.get(sessionId) || null : null)
+      const [entry, setEntry] = React.useState(() => readStored(sessionId))
       const [enabled, setEnabled] = React.useState(true)
 
       // A conversation switch must clear the reading immediately, before the
       // next poll can arrive; otherwise the previous channel lingers.
       React.useEffect(() => {
         mountedAt.current = Date.now()
-        setEntry(sessionId ? upstreamMemory.get(sessionId) || null : null)
+        setEntry(readStored(sessionId))
       }, [sessionId])
 
       React.useEffect(() => {
@@ -611,7 +662,7 @@ window.__ModuleLoader__.load({
             const owned = candidate
               && (candidate.session ? candidate.session === sessionId : candidate.at >= mountedAt.current)
             if (!owned) return
-            if (sessionId) upstreamMemory.set(sessionId, candidate)
+            storeReading(sessionId, candidate)
             setEntry(candidate)
           } catch {
             // The Host may be starting; retry on the next tick.
@@ -651,7 +702,8 @@ window.__ModuleLoader__.load({
         'data-tone': tone,
         title: detail,
       },
-      h('span', { className: 'dc-upstream-icon', 'aria-hidden': true }, h(RouteIcon, null)),
+      h('span', { className: 'dc-upstream-icon', 'aria-hidden': true },
+        h(IconBoundary, null, h(RouteIcon, null))),
       h('span', { className: 'dc-upstream-label' }, label))
     }
 
