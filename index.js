@@ -29,7 +29,7 @@ import {
 } from './core.js'
 
 const PKG = 'dsh-cline'
-const VERSION = '1.3.0'
+const VERSION = '1.3.1'
 const API_PREFIX = '/dsh-cline'
 const OR_API = 'https://openrouter.ai/api/v1'
 
@@ -433,6 +433,9 @@ function tapResponse(response, modelId, state, config, started, trace) {
   promise
     .then((info) => {
       if (!info) return
+      // An endpoint that carries no provider attribution (embeddings, a plain
+      // non-routed protocol) must not overwrite a good "last actual" value.
+      if (!info.provider) return
       const meta = state.model(modelId)
       if (info.pipeline) meta.pipeline = info.pipeline
       if (info.canonical) meta.canonicalSlug = info.canonical

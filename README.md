@@ -53,7 +53,7 @@ dsh plugin --profile desktop add github:MARYCOMPLEX/dsh-cline
 也可以锁定版本或分支：
 
 ```powershell
-dsh plugin --profile desktop add github:MARYCOMPLEX/dsh-cline#v1.3.0
+dsh plugin --profile desktop add github:MARYCOMPLEX/dsh-cline#v1.3.1
 ```
 
 更新到最新：
