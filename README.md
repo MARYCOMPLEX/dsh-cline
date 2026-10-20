@@ -53,7 +53,7 @@ dsh plugin --profile desktop add github:MARYCOMPLEX/dsh-cline
 也可以锁定版本或分支：
 
 ```powershell
-dsh plugin --profile desktop add github:MARYCOMPLEX/dsh-cline#v1.4.1
+dsh plugin --profile desktop add github:MARYCOMPLEX/dsh-cline#v1.4.2
 ```
 
 更新到最新：
@@ -147,13 +147,15 @@ config:
 界面位置：
 
 - **设置 → 模型 → Cline 上游 → 网关请求日志**：可筛选「全部 / 仅 Cline / 仅失败」，支持清空；
-- **输入框下方的状态条**：新增一个 `上游 <渠道>` 小胶囊，5 秒刷新，绿色=命中目标、黄色=实际与目标不同、红色=失败。点开设置页可看完整日志。
+- **输入框下方的状态条**：新增一个 `上游 <渠道>` 小胶囊，5 秒刷新。图标复用 Harness 内置的
+  `IconBranchOutlineRegular`（与「轮次 / tok」「缓存命中」胶囊同一套 outline 图标、同样 14 px 与 6 px 间距），
+  图标随状态着色：常规为三级文字色，黄色=实际与目标不同，红色=失败。点开设置页可看完整日志。
 
-胶囊的取值规则（1.4.1 起）：
+胶囊的取值规则（1.4.2 起）：
 
 | 情况 | 显示 |
 |---|---|
-| 最近一次请求有 `upstream` | `上游 alibaba`（绿勾同色圆点） |
+| 最近一次请求有 `upstream` | `上游 alibaba` |
 | 最近一次请求走的是别的提供商 | `经 cpa.gojia.cloud`，不再冒用上一条 Cline 的渠道 |
 | Cline 请求但响应没有路由字段（失败/空流） | `上游 未解析` |
 | 当前对话还没有发过请求 | 不显示 |

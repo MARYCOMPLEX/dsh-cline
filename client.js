@@ -8,6 +8,49 @@ window.__ModuleLoader__.load({
   factory(require) {
     const React = require('react')
     const h = React.createElement
+    // The same shared outline icon set the built-in composer pills use. It is a
+    // platform seed module, so no extra dependency declaration is involved; the
+    // fallback keeps the panel alive if that seed ever disappears.
+    const primitives = (() => {
+      try {
+        return require('@deepseek-ai/dsh-client-ui-primitives')
+      } catch {
+        return null
+      }
+    })()
+    const FallbackRouteIcon = () => h('svg', {
+      viewBox: '0 0 16 16',
+      fill: 'none',
+      stroke: 'currentColor',
+      strokeWidth: 1.5,
+      strokeLinecap: 'round',
+      strokeLinejoin: 'round',
+      'aria-hidden': true,
+    },
+    h('path', { d: 'M4 2.5v11' }),
+    h('path', { d: 'M4 7h4.2a3 3 0 0 0 3-3V2.5' }),
+    h('path', { d: 'M4 7h4.2a3 3 0 0 1 3 3v1.5' }))
+    const RouteIcon = (primitives && primitives.IconBranchOutlineRegular) || FallbackRouteIcon
+
+    // Match the built-in StatsPills geometry (14px icon, 6px gap, 1px/8px
+    // padding, 12px type) so the added pill sits in the same optical rhythm.
+    const PILL_CSS = [
+      '.dc-upstream-pill{display:inline-flex;align-items:center;gap:6px;min-width:0;padding:1px 8px;',
+      'border-radius:var(--dsw-radius-sm);color:var(--dsw-alias-label-tertiary);',
+      'font-size:calc(var(--dsh-content-font-size-secondary,13px) - 1px);',
+      'line-height:calc(20px + var(--dsh-content-font-delta-secondary,0px));white-space:nowrap}',
+      '.dc-upstream-pill svg{flex:none;width:14px;height:14px}',
+      '.dc-upstream-icon{display:inline-flex;flex:none;color:inherit}',
+      '.dc-upstream-label{overflow:hidden;text-overflow:ellipsis}',
+      '.dc-upstream-pill[data-tone="warn"] .dc-upstream-icon{color:var(--dsw-alias-state-warn-primary)}',
+      '.dc-upstream-pill[data-tone="bad"] .dc-upstream-icon{color:var(--dsw-alias-state-error-primary)}',
+    ].join('')
+    if (typeof document !== 'undefined' && document.querySelector('style[data-dsh-cline-pill]') === null) {
+      const style = document.createElement('style')
+      style.dataset.dshClinePill = ''
+      style.textContent = PILL_CSS
+      document.head.appendChild(style)
+    }
     const API = '/dsh-cline'
 
     // The Desktop renderer may load the page from file:// and talk to the Host
@@ -585,11 +628,7 @@ window.__ModuleLoader__.load({
       if (!enabled || !entry) return null
       const upstream = entry.upstream || null
       const mismatch = !!(entry.target && upstream && entry.target !== upstream)
-      const color = entry.error
-        ? 'var(--dsw-alias-state-error-primary, #d92d20)'
-        : mismatch
-          ? 'var(--dsw-alias-state-warn-primary, #b54708)'
-          : 'var(--dsw-alias-state-success-primary, #22c55e)'
+      const tone = entry.error ? 'bad' : mismatch ? 'warn' : undefined
       const zh = langFromStorage() === 'zh'
       // Never present a provider name as if it were a resolved upstream: when
       // the response carried no routing attribution the field stays unknown.
@@ -608,21 +647,12 @@ window.__ModuleLoader__.load({
         entry.error ? `error: ${entry.error}` : '',
       ].filter(Boolean).join('\n')
       return h('span', {
+        className: 'dc-upstream-pill',
+        'data-tone': tone,
         title: detail,
-        style: {
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: 5,
-          padding: '0 8px',
-          height: 20,
-          fontSize: 11.5,
-          lineHeight: '20px',
-          color: 'var(--dsw-alias-label-tertiary, #81858c)',
-          whiteSpace: 'nowrap',
-        },
       },
-      h('span', { style: { width: 6, height: 6, borderRadius: '50%', background: color, flex: 'none' } }),
-      label)
+      h('span', { className: 'dc-upstream-icon', 'aria-hidden': true }, h(RouteIcon, null)),
+      h('span', { className: 'dc-upstream-label' }, label))
     }
 
     function Panel(props) {
