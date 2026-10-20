@@ -1,6 +1,8 @@
-// Browser half of dsh-cline. Renders the Cline upstream console in the
-// Settings -> Models footer slot. Plain JavaScript: React comes from the
-// harness module table, styling uses host theme tokens with safe fallbacks.
+// Browser half of dsh-cline — the Cline upstream console.
+//
+// Rendered in the Settings -> Models footer slot. Styling uses the harness
+// alias tokens (--dsw-alias-*), so light and dark themes, contrast, and the
+// DeepSeek visual language come from the host instead of hard-coded colors.
 window.__ModuleLoader__.load({
   id: 'dsh-cline',
   factory(require) {
@@ -8,220 +10,342 @@ window.__ModuleLoader__.load({
     const h = React.createElement
     const API = '/dsh-cline'
 
+    // The Desktop renderer may load the page from file:// and talk to the Host
+    // over an absolute origin, so a relative path would resolve against the
+    // document and reach nothing. Prefer the advertised transport origin.
+    const TRANSPORT_ORIGIN = (() => {
+      try {
+        const transport = globalThis.__DSH_TRANSPORT__
+        if (transport && typeof transport.streamBaseUrl === 'string' && transport.streamBaseUrl) {
+          return new URL(transport.streamBaseUrl).origin
+        }
+      } catch {
+        // fall through
+      }
+      return ''
+    })()
+
+    const PAGE_IS_HTTP = (() => {
+      try {
+        return /^https?:$/.test(location.protocol)
+      } catch {
+        return false
+      }
+    })()
+
+    function apiURL(path) {
+      return (PAGE_IS_HTTP ? '' : TRANSPORT_ORIGIN) + API + path
+    }
+
     const TEXT = {
       zh: {
         title: 'Cline 上游',
-        subtitle: '枚举订阅模型背后的渠道，精确钉住或按优先级回退，并回读每条请求实际命中的上游。',
+        subtitle: '枚举订阅模型背后的渠道，钉住一个或按优先级回退，并回读每条请求实际命中的上游。',
+        gateway: '网关',
         enabled: '已启用',
         disabled: '已停用',
         enable: '启用',
         disable: '停用',
         refresh: '刷新',
         model: '模型',
+        chooseModel: '选择模型',
         pipeline: '管道',
+        canonical: '规范模型',
         channels: '渠道',
-        targets: '目标上游',
+        channelsTitle: '上游渠道',
+        channelsHint: '点「钉住」选择一个渠道；点「排除」让它永不被使用。',
+        models: '模型',
+        pinnedCount: '已钉',
+        requests: '请求',
+        errors: '错误',
         mode: '模式',
+        modeAuto: '自动',
+        modeStrict: '严格钉住',
+        modePreferred: '优先 + 回退',
+        modeAutoHint: '网关自行选择渠道；若设置了排除，只有白名单内的渠道可用。',
+        modeStrictHint: '只允许当前钉住的渠道；失败就直接报错。',
+        modePreferredHint: '按钉住顺序尝试；网关在第一个不可用时自动顺切。',
         sort: '排序',
-        last: '最近实际',
-        actions: '操作',
-        probe: '探测',
-        validate: '校验',
-        test: '测试',
-        auto: '自动（不钉）',
-        strict: '严格钉住',
-        preferred: '优先 + 回退',
-        smart: '网关智能选',
-        cost: '最低成本',
-        ttft: '最快首字',
-        tps: '最高吞吐',
-        unknown: '未探测',
-        noRows: '还没有可显示的模型。点「刷新」，或先发送一条消息让插件捕获模型。',
-        noChannels: '尚未枚举渠道，点「探测」获取。',
-        apiKeyMissing: '未检测到上游凭据，探测/校验/测试不可用；正常聊天仍会透传。',
-        disabledHint: '插件已停用：所有请求按原生方式透传，不会注入任何字段。',
-        probeCost: '探测会产生一条极小的真实请求；枚举渠道本身零 token。',
-        channelsTitle: '渠道与可用性',
-        selectOk: '全选可用',
-        clear: '清空优先',
-        priority: '优先',
+        sortSmart: '网关智能选',
+        sortCost: '最低成本',
+        sortTtft: '最快首字',
+        sortTps: '最高吞吐',
+        pinnedOrder: '钉住顺序',
+        noPinned: '当前为自动模式，未钉住任何渠道。',
+        pin: '钉住',
+        pinned: '已钉住',
+        unpin: '取消钉住',
         exclude: '排除',
+        excluded: '已排除',
+        include: '恢复',
         up: '上移',
         down: '下移',
+        remove: '移除',
+        clear: '清空',
+        auto: '改为自动',
+        probe: '探测渠道',
+        probing: '探测中…',
+        validate: '校验全部',
+        validating: '校验中…',
+        test: '测试钉住',
+        testing: '测试中…',
+        probeDone: '探测完成',
+        validateDone: '校验完成',
+        noChannels: '还没有渠道清单。点「探测渠道」枚举该模型的上游。',
+        noModels: '还没有观测到模型。先发一条消息，或点「刷新」。',
+        keyMissing: '未检测到上游凭据，探测/校验/测试不可用；正常聊天仍会透传。',
+        keyRef: '凭据引用',
+        interceptorWarn: '请求拦截器未处于激活状态',
+        diagHint: '诊断接口',
+        disabledHint: '插件已停用：所有请求按原生方式透传，不会注入任何字段。',
+        probeCost: '「探测」会产生一条极小的真实请求；枚举渠道本身零 token。',
         statusOk: '可用',
         statusLimited: '限流',
         statusBad: '不可钉',
-        statusAuth: '鉴权',
-        statusUnknown: '未知',
-        emptyPriority: '未选择上游 = 自动模式',
+        statusAuth: '鉴权失败',
+        statusUnknown: '未校验',
+        lastActual: '最近实际',
+        notProbed: '未探测',
         target: '目标',
         actual: '实际',
         attempts: '尝试',
-        noActual: '—',
-        error: '错误',
+        hit: '命中',
+        miss: '未命中目标',
+        testPassed: '钉住生效',
+        testFailed: '钉住未生效',
+        resultNote: '请求已到达模型，但推理耗尽输出预算，内容为空；该渠道可用。',
+        history: '请求历史',
+        noHistory: '暂无请求记录。',
         loading: '加载中…',
         requestFailed: '请求失败',
-        probeDone: '探测完成',
-        validateDone: '校验完成',
-        hit: '命中',
-        missed: '未命中目标',
-        trace: '尝试序列',
-        canonical: '规范模型',
-        probedAt: '上次探测',
-        validatedAt: '上次校验',
-        requests: '请求',
-        errors: '错误',
-        models: '模型',
-        pinned: '已钉',
+        saved: '已保存',
+        saveFailed: '保存失败',
+        probeFailed: '探测失败',
+        validateFailed: '校验失败',
+        testFailedReq: '测试失败',
+        unknown: '未知',
+        autoTag: '自动',
+        seconds: '秒',
+        ms: 'ms',
+        ctx: '上下文',
+        uptime: '在线率',
+        note: '备注',
       },
       en: {
         title: 'Cline Upstreams',
-        subtitle: 'Discover every channel behind a subscription model, pin one or an ordered fallback list, and read back which upstream actually served each request.',
+        subtitle: 'Discover the channels behind a subscription model, pin one or an ordered fallback list, and read back which upstream actually served each request.',
+        gateway: 'Gateway',
         enabled: 'Enabled',
         disabled: 'Disabled',
         enable: 'Enable',
         disable: 'Disable',
         refresh: 'Refresh',
         model: 'Model',
+        chooseModel: 'Choose a model',
         pipeline: 'Pipeline',
+        canonical: 'Canonical model',
         channels: 'Channels',
-        targets: 'Targets',
+        channelsTitle: 'Upstream channels',
+        channelsHint: 'Press Pin to select a channel; press Exclude to keep one out of every request.',
+        models: 'models',
+        pinnedCount: 'pinned',
+        requests: 'requests',
+        errors: 'errors',
         mode: 'Mode',
+        modeAuto: 'Auto',
+        modeStrict: 'Strict pin',
+        modePreferred: 'Preferred + fallback',
+        modeAutoHint: 'The gateway picks a channel; when exclusions are set, only the remaining whitelist is allowed.',
+        modeStrictHint: 'Only the pinned channel is allowed; a failure is reported as-is.',
+        modePreferredHint: 'Channels are tried in pinned order; the gateway falls through when one is unavailable.',
         sort: 'Sort',
-        last: 'Last actual',
-        actions: 'Actions',
-        probe: 'Probe',
-        validate: 'Validate',
-        test: 'Test',
-        auto: 'Auto (no pin)',
-        strict: 'Strict pin',
-        preferred: 'Preferred + fallback',
-        smart: 'Gateway default',
-        cost: 'Lowest cost',
-        ttft: 'Fastest first token',
-        tps: 'Highest throughput',
-        unknown: 'Not probed',
-        noRows: 'No models yet. Refresh, or send a message so the plugin can observe one.',
-        noChannels: 'No channels discovered yet. Press Probe.',
-        apiKeyMissing: 'Upstream credential not detected. Probe / validate / test are unavailable; ordinary chat still passes through.',
+        sortSmart: 'Gateway default',
+        sortCost: 'Lowest cost',
+        sortTtft: 'Fastest first token',
+        sortTps: 'Highest throughput',
+        pinnedOrder: 'Pinned order',
+        noPinned: 'Automatic mode: no channel is pinned.',
+        pin: 'Pin',
+        pinned: 'Pinned',
+        unpin: 'Unpin',
+        exclude: 'Exclude',
+        excluded: 'Excluded',
+        include: 'Restore',
+        up: 'Move up',
+        down: 'Move down',
+        remove: 'Remove',
+        clear: 'Clear',
+        auto: 'Switch to auto',
+        probe: 'Probe channels',
+        probing: 'Probing…',
+        validate: 'Validate all',
+        validating: 'Validating…',
+        test: 'Test pin',
+        testing: 'Testing…',
+        probeDone: 'Probe complete',
+        validateDone: 'Validation complete',
+        noChannels: 'No channel list yet. Press Probe channels to enumerate this model\'s upstreams.',
+        noModels: 'No model observed yet. Send a message, or press Refresh.',
+        keyMissing: 'No upstream credential detected. Probe / validate / test are unavailable; ordinary chat still passes through.',
+        keyRef: 'Credential reference',
+        interceptorWarn: 'The request interceptor is not active',
+        diagHint: 'Diagnostics endpoint',
         disabledHint: 'Plugin disabled: every request passes through unchanged.',
         probeCost: 'Probing sends one tiny real completion; enumerating channels itself costs zero tokens.',
-        channelsTitle: 'Channels and availability',
-        selectOk: 'Select available',
-        clear: 'Clear priority',
-        priority: 'Priority',
-        exclude: 'Exclude',
-        up: 'Up',
-        down: 'Down',
         statusOk: 'available',
         statusLimited: 'rate-limited',
         statusBad: 'not pinnable',
-        statusAuth: 'auth',
-        statusUnknown: 'unknown',
-        emptyPriority: 'No upstream selected = automatic mode',
+        statusAuth: 'auth failed',
+        statusUnknown: 'unverified',
+        lastActual: 'Last actual',
+        notProbed: 'Not probed',
         target: 'target',
         actual: 'actual',
         attempts: 'attempts',
-        noActual: '—',
-        error: 'error',
+        hit: 'hit',
+        miss: 'did not match the target',
+        testPassed: 'Pin is in effect',
+        testFailed: 'Pin did not take effect',
+        resultNote: 'The request reached the model but reasoning consumed the output budget, so the content is empty; the channel is usable.',
+        history: 'Request history',
+        noHistory: 'No requests recorded yet.',
         loading: 'Loading…',
         requestFailed: 'Request failed',
-        probeDone: 'Probe complete',
-        validateDone: 'Validation complete',
-        hit: 'hit',
-        missed: 'did not match target',
-        trace: 'Attempts',
-        canonical: 'Canonical model',
-        probedAt: 'Probed',
-        validatedAt: 'Validated',
-        requests: 'requests',
-        errors: 'errors',
-        models: 'models',
-        pinned: 'pinned',
+        saved: 'Saved',
+        saveFailed: 'Save failed',
+        probeFailed: 'Probe failed',
+        validateFailed: 'Validation failed',
+        testFailedReq: 'Test failed',
+        unknown: 'unknown',
+        autoTag: 'auto',
+        seconds: 's',
+        ms: 'ms',
+        ctx: 'ctx',
+        uptime: 'uptime',
+        note: 'note',
       },
     }
 
-    const COLORS = {
-      bg: 'var(--dsw-alias-bg-layer-1, #171a21)',
-      bgSoft: 'var(--dsw-alias-bg-layer-2, #1d212b)',
-      border: 'var(--dsw-alias-border, #2a2f3c)',
-      text: 'var(--dsw-alias-text, #e6e6e6)',
-      dim: 'var(--dsw-alias-text-secondary, #9aa4b2)',
-      accent: 'var(--dsw-alias-accent, #4c8dff)',
-      danger: 'var(--dsw-alias-danger, #ff6b6b)',
-      success: 'var(--dsw-alias-success, #52c41a)',
-      warning: 'var(--dsw-alias-warning, #d89614)',
-    }
-
-    const S = {
-      card: {
-        marginTop: 18,
-        border: `1px solid ${COLORS.border}`,
-        borderRadius: 10,
-        background: COLORS.bg,
-        color: COLORS.text,
-        padding: 16,
-        boxSizing: 'border-box',
-        font: '13px/1.55 system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif',
-      },
-      header: { display: 'flex', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' },
-      title: { fontSize: 15, fontWeight: 650, letterSpacing: 0.1 },
-      subtitle: { color: COLORS.dim, fontSize: 12.5, marginTop: 3, maxWidth: 760 },
-      grow: { flex: '1 1 auto' },
-      toolbar: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' },
-      stats: { display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 },
-      stat: { border: `1px solid ${COLORS.border}`, borderRadius: 20, padding: '2px 10px', color: COLORS.dim, fontSize: 12 },
-      banner: { marginTop: 12, border: `1px solid ${COLORS.border}`, borderLeft: `3px solid ${COLORS.warning}`, borderRadius: 6, padding: '8px 10px', color: COLORS.dim, fontSize: 12.5 },
-      error: { borderLeftColor: COLORS.danger, color: COLORS.danger },
-      success: { borderLeftColor: COLORS.success, color: COLORS.success },
-      tableWrap: { marginTop: 14, overflowX: 'auto' },
-      table: { width: '100%', borderCollapse: 'collapse', minWidth: 980 },
-      th: { textAlign: 'left', color: COLORS.dim, fontWeight: 500, fontSize: 11.5, padding: '7px 8px', borderBottom: `1px solid ${COLORS.border}`, whiteSpace: 'nowrap' },
-      td: { padding: '8px', borderBottom: `1px solid ${COLORS.border}`, verticalAlign: 'top' },
-      mono: { fontFamily: 'Consolas, "Cascadia Mono", monospace', fontSize: 12 },
-      small: { color: COLORS.dim, fontSize: 11.5 },
-      select: { background: COLORS.bgSoft, color: COLORS.text, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: '4px 6px', fontSize: 12 },
-      button: { background: 'transparent', border: `1px solid ${COLORS.border}`, color: COLORS.text, borderRadius: 6, padding: '4px 9px', fontSize: 12, cursor: 'pointer' },
-      buttonOn: { background: COLORS.accent, borderColor: COLORS.accent, color: '#fff' },
-      buttonDanger: { borderColor: COLORS.danger, color: COLORS.danger },
-      buttonTiny: { padding: '2px 7px', fontSize: 11 },
-      chip: { display: 'inline-flex', alignItems: 'center', gap: 4, border: `1px solid ${COLORS.border}`, borderRadius: 14, padding: '2px 8px', fontSize: 11.5, cursor: 'pointer', color: COLORS.dim, background: 'transparent' },
-      chipOn: { borderColor: COLORS.accent, color: COLORS.accent, background: 'color-mix(in srgb, var(--dsw-alias-accent, #4c8dff) 12%, transparent)' },
-      chipBad: { borderColor: COLORS.danger, color: COLORS.danger },
-      badge: { display: 'inline-flex', alignItems: 'center', gap: 4, borderRadius: 12, padding: '1px 8px', fontSize: 11.5, border: `1px solid ${COLORS.border}`, color: COLORS.dim },
-      dot: { width: 7, height: 7, borderRadius: '50%', display: 'inline-block' },
-      detail: { padding: '10px 12px 14px', background: COLORS.bgSoft, borderBottom: `1px solid ${COLORS.border}` },
-      channelRow: { display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', padding: '6px 0', borderBottom: `1px dashed ${COLORS.border}` },
-      channelName: { minWidth: 180, fontWeight: 550 },
-      spacer: { flex: '1 1 auto' },
-      nowrap: { whiteSpace: 'nowrap' },
-    }
-
-    const STATUS = {
-      ok: { color: COLORS.success, key: 'statusOk' },
-      limited: { color: COLORS.warning, key: 'statusLimited' },
-      bad: { color: COLORS.danger, key: 'statusBad' },
-      auth: { color: COLORS.danger, key: 'statusAuth' },
-      unknown: { color: COLORS.dim, key: 'statusUnknown' },
-    }
+    const CSS = `
+.dc-root{--dc-bg:var(--dsw-alias-bg-layer-1,light-dark(#fff,#232324));--dc-surface:var(--dsw-alias-bg-layer-2,light-dark(#f9fafb,#2c2c2e));--dc-surface-3:var(--dsw-alias-bg-layer-3,light-dark(#f5f6f7,#353638));--dc-border:var(--dsw-alias-border-l2,light-dark(rgba(0,0,0,.10),rgba(255,255,255,.12)));--dc-border-strong:var(--dsw-alias-border-l3,light-dark(rgba(0,0,0,.16),rgba(255,255,255,.18)));--dc-text:var(--dsw-alias-label-primary,light-dark(#0f1115,#f9fafb));--dc-text-2:var(--dsw-alias-label-secondary,light-dark(#61666b,#cfd3d6));--dc-text-3:var(--dsw-alias-label-tertiary,light-dark(#81858c,#adb2b8));--dc-fill:var(--dsw-alias-button-primary-fill,light-dark(#0f1115,#f9fafb));--dc-fill-hover:var(--dsw-alias-button-primary-hover,light-dark(#353638,#ebeef2));--dc-on-fill:var(--dsw-alias-label-primary-foreground,light-dark(#fff,#0f1115));--dc-hover:var(--dsw-alias-interactive-bg-hover,light-dark(rgba(0,0,0,.05),rgba(255,255,255,.08)));--dc-active:var(--dsw-alias-interactive-bg-active,light-dark(rgba(0,0,0,.09),rgba(255,255,255,.14)));--dc-link:var(--dsw-alias-link,light-dark(#4176e6,#7aaaff));--dc-error:var(--dsw-alias-state-error-primary,light-dark(#d92d20,#ff8a8a));--dc-success:var(--dsw-alias-state-success-primary,light-dark(#0f8a4f,#4ade80));--dc-warn:var(--dsw-alias-state-warn-primary,light-dark(#b54708,#fbbf24));color-scheme:light dark;margin-top:24px;padding:20px;border:1px solid var(--dc-border);border-radius:14px;background:var(--dc-bg);color:var(--dc-text);font:13px/1.55 system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;box-sizing:border-box}
+.dc-root *{box-sizing:border-box}
+.dc-head{display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap}
+.dc-head-main{flex:1 1 380px;min-width:240px}
+.dc-title{font-size:16px;font-weight:600;letter-spacing:.01em}
+.dc-sub{margin-top:4px;color:var(--dc-text-2);font-size:13px;max-width:760px}
+.dc-gateway{margin-top:6px;color:var(--dc-text-3);font-size:11.5px;font-family:Consolas,"Cascadia Mono",monospace}
+.dc-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.dc-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:32px;padding:0 12px;border:1px solid var(--dc-border);border-radius:8px;background:transparent;color:var(--dc-text);font-size:13px;font-family:inherit;line-height:1;cursor:pointer;white-space:nowrap;transition:background .12s ease,border-color .12s ease,color .12s ease}
+.dc-btn:hover:not(:disabled){background:var(--dc-hover)}
+.dc-btn:focus-visible{outline:2px solid var(--dc-link);outline-offset:2px}
+.dc-btn:disabled{opacity:.45;cursor:not-allowed}
+.dc-btn-primary{background:var(--dc-fill);border-color:var(--dc-fill);color:var(--dc-on-fill);font-weight:600}
+.dc-btn-primary:hover:not(:disabled){background:var(--dc-fill-hover);border-color:var(--dc-fill-hover)}
+.dc-btn-ghost{border-color:transparent}
+.dc-btn-ghost:hover:not(:disabled){background:var(--dc-hover)}
+.dc-btn-danger{border-color:transparent;color:color-mix(in srgb,var(--dc-error) 80%,var(--dc-text))}
+.dc-btn-danger:hover:not(:disabled){background:color-mix(in srgb,var(--dc-error) 12%,transparent)}
+.dc-btn-sm{height:28px;padding:0 10px;font-size:12px;border-radius:7px}
+.dc-btn-xs{height:24px;width:24px;padding:0;font-size:12px;border-radius:6px;border-color:transparent;color:var(--dc-text-2)}
+.dc-btn-xs:hover:not(:disabled){background:var(--dc-hover);color:var(--dc-text)}
+.dc-switch{position:relative;width:38px;height:22px;padding:0;border:1px solid var(--dc-border-strong);border-radius:999px;background:var(--dc-surface-3);cursor:pointer;flex:none}
+.dc-switch:focus-visible{outline:2px solid var(--dc-link);outline-offset:2px}
+.dc-switch span{position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--dc-text-2);transition:transform .15s ease,background .15s ease}
+.dc-switch[aria-checked="true"]{background:var(--dc-fill);border-color:var(--dc-fill)}
+.dc-switch[aria-checked="true"] span{transform:translateX(16px);background:var(--dc-on-fill)}
+.dc-stats{display:flex;gap:22px;flex-wrap:wrap;margin-top:16px;padding-top:14px;border-top:1px solid var(--dc-border)}
+.dc-stat{display:flex;flex-direction:column;gap:1px;min-width:56px}
+.dc-stat-v{font-size:16px;font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+.dc-stat-l{font-size:11px;color:var(--dc-text-3)}
+.dc-picker{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:18px;padding-top:16px;border-top:1px solid var(--dc-border)}
+.dc-select{height:34px;min-width:300px;max-width:100%;padding:0 10px;border:1px solid var(--dc-border);border-radius:8px;background:var(--dc-surface);color:var(--dc-text);font:inherit;font-size:13px;cursor:pointer}
+.dc-select:focus-visible{outline:2px solid var(--dc-link);outline-offset:1px}
+.dc-pipe{display:inline-flex;align-items:center;height:24px;padding:0 9px;border:1px solid var(--dc-border);border-radius:999px;font-size:11.5px;color:var(--dc-text-2);white-space:nowrap}
+.dc-pipe-planner{color:var(--dc-link);border-color:var(--dc-link)}
+.dc-pipe-direct{color:var(--dc-success);border-color:var(--dc-success)}
+.dc-section{margin-top:18px;padding-top:16px;border-top:1px solid var(--dc-border)}
+.dc-section-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+.dc-section-title{font-size:14px;font-weight:600}
+.dc-hint{color:var(--dc-text-3);font-size:12px}
+.dc-spacer{flex:1 1 auto}
+.dc-seg{display:inline-flex;gap:2px;padding:2px;border:1px solid var(--dc-border);border-radius:9px;background:var(--dc-surface)}
+.dc-seg button{height:26px;padding:0 11px;border:0;border-radius:7px;background:transparent;color:var(--dc-text-2);font:inherit;font-size:12px;cursor:pointer}
+.dc-seg button:hover{color:var(--dc-text);background:var(--dc-hover)}
+.dc-seg button[aria-pressed="true"]{background:var(--dc-active);color:var(--dc-text);font-weight:600}
+.dc-seg button:focus-visible{outline:2px solid var(--dc-link);outline-offset:1px}
+.dc-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.dc-label{color:var(--dc-text-3);font-size:12px}
+.dc-pinned{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 12px;margin-bottom:10px;border:1px solid var(--dc-border);border-radius:10px;background:var(--dc-surface)}
+.dc-chip{display:inline-flex;align-items:center;gap:4px;height:28px;padding:0 4px 0 10px;border:1px solid var(--dc-border-strong);border-radius:999px;background:var(--dc-bg);font-size:12px;max-width:100%}
+.dc-chip-name{font-family:Consolas,"Cascadia Mono",monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:180px}
+.dc-chip-pos{display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:var(--dc-active);color:var(--dc-text-2);font-size:10.5px;font-variant-numeric:tabular-nums}
+.dc-list{border:1px solid var(--dc-border);border-radius:10px;overflow:hidden;background:var(--dc-bg)}
+.dc-channel{display:grid;grid-template-columns:92px minmax(150px,1.4fr) 120px minmax(120px,auto) 78px;gap:12px;align-items:center;padding:10px 12px;border-top:1px solid var(--dc-border)}
+.dc-channel:first-child{border-top:0}
+.dc-channel:hover{background:var(--dc-hover)}
+.dc-channel-selected{background:color-mix(in srgb,var(--dc-link) 7%,transparent)}
+.dc-channel-selected:hover{background:color-mix(in srgb,var(--dc-link) 10%,transparent)}
+.dc-slug{font-family:Consolas,"Cascadia Mono",monospace;font-size:13px;font-weight:600;overflow-wrap:anywhere}
+.dc-ch-sub{color:var(--dc-text-3);font-size:11.5px;margin-top:1px}
+.dc-status{display:inline-flex;align-items:center;gap:6px;color:var(--dc-text-2);font-size:12px;white-space:nowrap}
+.dc-dot{width:8px;height:8px;border-radius:50%;flex:none}
+.dc-meta{color:var(--dc-text-3);font-size:11.5px;font-variant-numeric:tabular-nums}
+.dc-meta-line{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.dc-notice{margin-top:14px;padding:10px 12px;border:1px solid var(--dc-border);border-left:3px solid var(--dc-text-3);border-radius:8px;background:var(--dc-surface);color:var(--dc-text-2);font-size:12.5px;line-height:1.6}
+.dc-notice-ok{border-left-color:var(--dc-success)}
+.dc-notice-warn{border-left-color:var(--dc-warn)}
+.dc-notice-bad{border-left-color:var(--dc-error);color:color-mix(in srgb,var(--dc-error) 80%,var(--dc-text))}
+.dc-result{margin-top:14px;padding:12px 14px;border:1px solid var(--dc-border);border-radius:10px;background:var(--dc-surface);display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+.dc-result-ok{border-color:color-mix(in srgb,var(--dc-success) 50%,var(--dc-border))}
+.dc-result-bad{border-color:color-mix(in srgb,var(--dc-error) 50%,var(--dc-border))}
+.dc-result-main{font-size:13px;font-weight:600}
+.dc-result-body{display:flex;flex-direction:column;gap:2px;min-width:0}
+.dc-code{font-family:Consolas,"Cascadia Mono",monospace;font-size:12px;overflow-wrap:anywhere}
+.dc-empty{padding:20px 4px;color:var(--dc-text-3);font-size:12.5px;text-align:center}
+.dc-history{margin-top:16px}
+.dc-history summary{cursor:pointer;color:var(--dc-text-2);font-size:12.5px;user-select:none}
+.dc-history summary:focus-visible{outline:2px solid var(--dc-link);outline-offset:2px}
+.dc-history-row{display:grid;grid-template-columns:110px minmax(120px,1fr) 64px 70px;gap:10px;padding:6px 0;border-top:1px solid var(--dc-border);font-size:12px;align-items:center}
+.dc-history-row:first-of-type{margin-top:8px}
+.dc-truncate{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dc-footer{margin-top:14px;color:var(--dc-text-3);font-size:11.5px}
+@media (max-width:820px){.dc-channel{grid-template-columns:1fr 1fr}.dc-channel .dc-ch-name{grid-column:1/-1}.dc-channel .dc-ch-actions{grid-column:2;justify-self:end}.dc-channel .dc-ch-status{grid-column:1;grid-row:2}.dc-channel .dc-ch-meta{grid-column:1/-1}.dc-select{min-width:0;width:100%}.dc-seg button{padding:0 8px}}
+@media (prefers-reduced-motion:reduce){.dc-root *{transition:none!important}}
+`
 
     function langFromStorage() {
       try {
-        const saved = window.localStorage.getItem('dsh-cline.lang')
-        if (saved === 'zh' || saved === 'en') return saved
+        if (typeof window !== 'undefined' && window.localStorage) {
+          const saved = window.localStorage.getItem('dsh-cline.lang')
+          if (saved === 'zh' || saved === 'en') return saved
+        }
       } catch {
         // ignore
       }
-      return String(navigator.language || 'en').toLowerCase().startsWith('zh') ? 'zh' : 'en'
+      const language = typeof navigator !== 'undefined' ? String(navigator.language || '') : ''
+      return language.toLowerCase().startsWith('zh') ? 'zh' : 'en'
+    }
+
+    async function request(path, init) {
+      const target = apiURL(path)
+      let response
+      try {
+        response = await fetch(target, init)
+      } catch (failure) {
+        // A file:// page with no advertised origin, or a stale origin: retry
+        // against the transport origin once before reporting a network error.
+        if (!PAGE_IS_HTTP && TRANSPORT_ORIGIN) throw failure
+        throw new Error(`${failure && failure.message ? failure.message : failure} (${target})`)
+      }
+      return response
     }
 
     async function api(path, body) {
-      const response = await fetch(API + path, body === undefined
-        ? { headers: { accept: 'application/json' }, credentials: 'same-origin' }
+      const response = await request(path, body === undefined
+        ? { headers: { accept: 'application/json' } }
         : {
           method: 'POST',
           headers: { 'content-type': 'application/json', accept: 'application/json' },
-          credentials: 'same-origin',
           body: JSON.stringify(body),
         })
       const json = await response.json().catch(() => ({ ok: false, error: `HTTP ${response.status}` }))
@@ -231,221 +355,162 @@ window.__ModuleLoader__.load({
     }
 
     async function apiRaw(path, body) {
-      const response = await fetch(API + path, {
+      const response = await request(path, {
         method: 'POST',
         headers: { 'content-type': 'application/json', accept: 'application/json' },
-        credentials: 'same-origin',
         body: JSON.stringify(body),
       })
       const json = await response.json().catch(() => ({ ok: false, error: `HTTP ${response.status}` }))
       return { status: response.status, json }
     }
 
+    function emptyModel(id) {
+      return {
+        id,
+        pipeline: null,
+        canonicalSlug: null,
+        upstreams: [],
+        cfg: { upstreams: [], exclude: [], pinMode: 'strict', sort: null },
+        last: null,
+        history: [],
+        requests: 0,
+        errors: 0,
+        probedAt: null,
+        validatedAt: null,
+        tier0: [],
+      }
+    }
+
+    function normalizeCfg(input) {
+      const cfg = input && typeof input === 'object' ? input : {}
+      return {
+        upstreams: Array.isArray(cfg.upstreams) ? cfg.upstreams : [],
+        exclude: Array.isArray(cfg.exclude) ? cfg.exclude : [],
+        pinMode: cfg.pinMode === 'preferred' ? 'preferred' : 'strict',
+        sort: ['cost', 'ttft', 'tps'].includes(cfg.sort) ? cfg.sort : null,
+      }
+    }
+
     function fmtTime(value) {
       if (!value) return '—'
       try {
-        return new Date(value).toLocaleTimeString()
+        const date = new Date(value)
+        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
       } catch {
         return '—'
       }
     }
 
-    function pipelineBadge(model, t) {
-      if (model.pipeline === 'planner') return h('span', { style: { ...S.badge, borderColor: COLORS.accent, color: COLORS.accent } }, 'planner · Vercel')
-      if (model.pipeline === 'direct') return h('span', { style: { ...S.badge, borderColor: COLORS.success, color: COLORS.success } }, 'direct · OpenRouter')
-      return h('span', { style: S.badge }, t.unknown)
+    function fmtContext(value) {
+      const number = Number(value)
+      if (!Number.isFinite(number) || number <= 0) return null
+      if (number >= 1000000) return `${Math.round(number / 100000) / 10}M`
+      if (number >= 1000) return `${Math.round(number / 1000)}k`
+      return String(number)
     }
 
-    function statusBadge(channel, t) {
-      const status = channel.status && STATUS[channel.status] ? channel.status : 'unknown'
-      const meta = STATUS[status]
-      return h('span', { style: { ...S.badge, color: meta.color, borderColor: meta.color }, title: channel.note || '' },
-        h('span', { style: { ...S.dot, background: meta.color } }),
-        t[meta.key])
+    function statusMeta(status) {
+      switch (status) {
+        case 'ok':
+          return { color: 'var(--dc-success)', key: 'statusOk' }
+        case 'limited':
+          return { color: 'var(--dc-warn)', key: 'statusLimited' }
+        case 'bad':
+          return { color: 'var(--dc-error)', key: 'statusBad' }
+        case 'auth':
+          return { color: 'var(--dc-error)', key: 'statusAuth' }
+        default:
+          return { color: 'var(--dc-text-3)', key: 'statusUnknown' }
+      }
     }
 
-    function Chip(props) {
-      return h('button', {
-        type: 'button',
-        onClick: props.onClick,
-        title: props.title || '',
-        'aria-pressed': !!props.on,
-        style: { ...S.chip, ...(props.on ? S.chipOn : null), ...(props.bad ? S.chipBad : null) },
-      }, props.children)
+    function StatusPill(props) {
+      const meta = statusMeta(props.status)
+      return h('span', { className: 'dc-status', title: props.note || '' },
+        h('span', { className: 'dc-dot', style: { background: meta.color } }),
+        h('span', null, props.t[meta.key]),
+      )
     }
 
-    function channelLabel(channel) {
-      return channel.slug
+    function PipelineBadge(props) {
+      const pipeline = props.pipeline
+      if (pipeline === 'planner') return h('span', { className: 'dc-pipe dc-pipe-planner' }, 'planner · Vercel')
+      if (pipeline === 'direct') return h('span', { className: 'dc-pipe dc-pipe-direct' }, 'direct · OpenRouter')
+      return h('span', { className: 'dc-pipe' }, props.t.notProbed)
     }
 
-    function ModelRow(props) {
-      const { model, lang, busy, expanded, onToggle, onProbe, onValidate, onTest, onCfg, t } = props
-      const cfg = model.cfg || { upstreams: [], exclude: [], pinMode: 'strict', sort: null }
-      const selected = Array.isArray(cfg.upstreams) ? cfg.upstreams : []
-      const excluded = Array.isArray(cfg.exclude) ? cfg.exclude : []
-      const rowBusy = busy && String(busy).endsWith(`:${model.id}`)
-      const anyBusy = !!busy
-      const channels = Array.isArray(model.upstreams) ? model.upstreams : []
-      const last = model.last || null
-      const target = selected[0] || null
-      const actual = last && last.provider ? last.provider : null
-      const hit = !target || (actual && actual === target)
-
-      const save = (patch) => {
-        onCfg(model, patch)
-      }
-
-      const togglePriority = (slug) => {
-        const next = selected.includes(slug) ? selected.filter((value) => value !== slug) : [...selected, slug]
-        save({ upstreams: next, exclude: excluded.filter((value) => value !== slug) })
-      }
-
-      const toggleExclude = (slug) => {
-        const next = excluded.includes(slug) ? excluded.filter((value) => value !== slug) : [...excluded, slug]
-        save({ exclude: next, upstreams: selected.filter((value) => value !== slug) })
-      }
-
-      const move = (slug, delta) => {
-        const index = selected.indexOf(slug)
-        if (index < 0) return
-        const next = [...selected]
-        const targetIndex = index + delta
-        if (targetIndex < 0 || targetIndex >= next.length) return
-        ;[next[index], next[targetIndex]] = [next[targetIndex], next[index]]
-        save({ upstreams: next })
-      }
-
-      const selectAvailable = () => {
-        const usable = channels
-          .filter((channel) => !channel.status || channel.status === 'ok')
-          .map((channel) => channel.slug)
-          .filter((slug) => !excluded.includes(slug))
-        save({ upstreams: [...new Set([...selected, ...usable])] })
-      }
-
-      return h(React.Fragment, null,
-        h('tr', null,
-          h('td', { style: S.td },
-            h('div', { style: S.mono }, model.id),
-            h('div', { style: S.small }, `${model.requests || 0} ${t.requests}${model.errors ? ` · ${model.errors} ${t.errors}` : ''}`),
-            h('div', { style: { marginTop: 4 } }, pipelineBadge(model, t)),
-          ),
-          h('td', { style: { ...S.td, ...S.small } },
-            model.canonicalSlug ? h('div', { style: S.mono }, model.canonicalSlug) : '—',
-            model.tier0 && model.tier0.length ? h('div', { style: S.small }, `tier-0: ${model.tier0.join(', ')}`) : null,
-          ),
-          h('td', { style: S.td },
-            h('div', { style: { display: 'flex', gap: 6, alignItems: 'center' } },
-              h('span', { style: { ...S.badge, borderColor: channels.length ? COLORS.border : COLORS.warning } }, String(channels.length)),
-              h('button', { type: 'button', style: { ...S.button, ...S.buttonTiny }, onClick: () => onToggle(model.id) }, expanded ? '−' : '+'),
-            ),
-          ),
-          h('td', { style: S.td },
-            selected.length
-              ? h('div', { style: { display: 'flex', gap: 4, flexWrap: 'wrap', maxWidth: 260 } }, selected.map((slug, index) => h('span', { key: slug, style: { ...S.badge, color: COLORS.accent, borderColor: COLORS.accent } }, `${index + 1}. ${slug}`)))
-              : h('span', { style: S.small }, t.auto),
-          ),
-          h('td', { style: S.td },
-            h('select', {
-              value: cfg.pinMode || 'strict',
-              style: S.select,
-              onChange: (event) => save({ pinMode: event.target.value }),
-            },
-            h('option', { value: 'strict' }, t.strict),
-            h('option', { value: 'preferred' }, t.preferred)),
-          ),
-          h('td', { style: S.td },
-            h('select', {
-              value: cfg.sort || '',
-              style: S.select,
-              onChange: (event) => save({ sort: event.target.value || null }),
-            },
-            h('option', { value: '' }, t.smart),
-            h('option', { value: 'cost' }, t.cost),
-            h('option', { value: 'ttft' }, t.ttft),
-            h('option', { value: 'tps' }, t.tps)),
-          ),
-          h('td', { style: S.td },
-            actual
-              ? h('div', null,
-                h('span', { style: { ...S.badge, color: hit ? COLORS.success : COLORS.warning, borderColor: hit ? COLORS.success : COLORS.warning } }, actual),
-                h('div', { style: S.small }, `${last.ms || 0} ms · ${fmtTime(last.at)}`),
-              )
-              : h('div', null,
-                h('span', { style: { ...S.badge, color: last && last.error ? COLORS.danger : COLORS.dim } }, last && last.error ? t.error : t.noActual),
-                last && last.error ? h('div', { style: { ...S.small, color: COLORS.danger, maxWidth: 220, wordBreak: 'break-word' } }, String(last.error).slice(0, 160)) : null,
-              ),
-            last && Array.isArray(last.attempts) && last.attempts.length > 1
-              ? h('div', { style: { ...S.small, marginTop: 3 } }, `${t.trace}: ${last.attempts.join(' → ')}`)
-              : null,
-          ),
-          h('td', { style: S.td },
-            h('div', { style: { display: 'flex', gap: 6, flexWrap: 'wrap' } },
-              h('button', { type: 'button', disabled: anyBusy, style: S.button, onClick: () => onProbe(model) }, rowBusy && String(busy).startsWith('probe:') ? '…' : t.probe),
-              h('button', { type: 'button', disabled: anyBusy || !channels.length, style: S.button, onClick: () => onValidate(model) }, rowBusy && String(busy).startsWith('validate:') ? '…' : t.validate),
-              h('button', { type: 'button', disabled: anyBusy, style: S.button, onClick: () => onTest(model) }, rowBusy && String(busy).startsWith('test:') ? '…' : t.test),
-            ),
+    function ChannelRow(props) {
+      const { channel, position, excluded, t, busy, onPin, onExclude, busyKey } = props
+      const selected = position >= 0
+      const meta = statusMeta(channel.status)
+      const context = fmtContext(channel.context)
+      return h('div', { className: `dc-channel${selected ? ' dc-channel-selected' : ''}` },
+        h('button', {
+          type: 'button',
+          className: `dc-btn dc-btn-sm${selected ? ' dc-btn-primary' : ''}`,
+          disabled: busy,
+          'aria-pressed': selected,
+          onClick: () => onPin(channel.slug),
+          title: selected ? t.unpin : t.pin,
+        }, busyKey === `pin:${channel.slug}` ? '…' : selected ? `✓ ${position + 1}` : t.pin),
+        h('div', { className: 'dc-ch-name' },
+          h('div', { className: 'dc-slug' }, channel.slug),
+          h('div', { className: 'dc-ch-sub' },
+            channel.name && channel.name !== channel.slug ? channel.name : t[meta.key],
+            channel.note ? ` · ${String(channel.note).slice(0, 90)}` : '',
           ),
         ),
-        expanded ? h('tr', null,
-          h('td', { colSpan: 8, style: S.detail },
-            h('div', { style: { display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' } },
-              h('strong', null, t.channelsTitle),
-              h('span', { style: S.small }, model.probedAt ? `${t.probedAt} ${fmtTime(model.probedAt)}` : ''),
-              model.validatedAt ? h('span', { style: S.small }, `${t.validatedAt} ${fmtTime(model.validatedAt)}`) : null,
-              h('span', { style: S.spacer }),
-              h('button', { type: 'button', disabled: anyBusy, style: { ...S.button, ...S.buttonTiny }, onClick: selectAvailable }, t.selectOk),
-              h('button', { type: 'button', disabled: anyBusy, style: { ...S.button, ...S.buttonTiny }, onClick: () => save({ upstreams: [] }) }, t.clear),
-            ),
-            channels.length
-              ? h('div', { style: { marginTop: 8 } }, channels.map((channel) => {
-                const isSelected = selected.includes(channel.slug)
-                const isExcluded = excluded.includes(channel.slug)
-                const position = selected.indexOf(channel.slug)
-                return h('div', { key: channel.slug, style: S.channelRow },
-                  h('button', {
-                    type: 'button',
-                    onClick: () => togglePriority(channel.slug),
-                    'aria-pressed': isSelected,
-                    style: { ...S.button, ...S.buttonTiny, ...(isSelected ? S.buttonOn : null) },
-                    title: t.priority,
-                  }, isSelected ? `✓ ${t.priority} ${position + 1}` : t.priority),
-                  h('button', {
-                    type: 'button',
-                    onClick: () => toggleExclude(channel.slug),
-                    'aria-pressed': isExcluded,
-                    style: { ...S.button, ...S.buttonTiny, ...(isExcluded ? { ...S.buttonDanger, background: 'transparent', borderColor: COLORS.danger } : null) },
-                    title: t.exclude,
-                  }, isExcluded ? `✕ ${t.exclude}` : t.exclude),
-                  h('button', { type: 'button', disabled: !isSelected || position <= 0, style: { ...S.button, ...S.buttonTiny }, onClick: () => move(channel.slug, -1), title: t.up }, '↑'),
-                  h('button', { type: 'button', disabled: !isSelected || position < 0 || position >= selected.length - 1, style: { ...S.button, ...S.buttonTiny }, onClick: () => move(channel.slug, 1), title: t.down }, '↓'),
-                  h('span', { style: { ...S.channelName, ...S.mono } }, channelLabel(channel)),
-                  channel.name && channel.name !== channel.slug ? h('span', { style: S.small }, channel.name) : null,
-                  statusBadge(channel, t),
-                  channel.ms ? h('span', { style: S.small }, `${channel.ms} ms`) : null,
-                  channel.context ? h('span', { style: S.small }, `ctx ${channel.context}`) : null,
-                  channel.uptime ? h('span', { style: S.small }, `up ${channel.uptime}%`) : null,
-                  h('span', { style: S.spacer }),
-                  channel.note ? h('span', { style: { ...S.small, maxWidth: 360, wordBreak: 'break-word' }, title: channel.note }, String(channel.note).slice(0, 120)) : null,
-                )
-              }))
-              : h('div', { style: { ...S.small, marginTop: 8 } }, t.noChannels),
-            selected.length
-              ? h('div', { style: { ...S.small, marginTop: 10 } }, `${t.targets}: ${selected.join(' > ')}${cfg.pinMode === 'strict' ? ` · ${t.strict}` : ` · ${t.preferred}`}`)
-              : h('div', { style: { ...S.small, marginTop: 10 } }, t.emptyPriority),
-          ),
-        ) : null,
+        h('div', { className: 'dc-ch-status' }, h(StatusPill, { status: channel.status, note: channel.note, t })),
+        h('div', { className: 'dc-ch-meta dc-meta-line' },
+          channel.ms ? h('span', { className: 'dc-meta' }, `${channel.ms} ${t.ms}`) : null,
+          context ? h('span', { className: 'dc-meta' }, `${t.ctx} ${context}`) : null,
+          channel.uptime ? h('span', { className: 'dc-meta' }, `${t.uptime} ${channel.uptime}%`) : null,
+        ),
+        h('div', { className: 'dc-ch-actions' },
+          h('button', {
+            type: 'button',
+            className: `dc-btn dc-btn-sm dc-btn-ghost${excluded ? ' dc-btn-danger' : ''}`,
+            disabled: busy,
+            'aria-pressed': excluded,
+            onClick: () => onExclude(channel.slug),
+            title: excluded ? t.include : t.exclude,
+          }, excluded ? t.excluded : t.exclude),
+        ),
+      )
+    }
+
+    function PinChip(props) {
+      const { slug, index, total, t, busy, onMove, onRemove } = props
+      return h('span', { className: 'dc-chip' },
+        h('span', { className: 'dc-chip-pos' }, String(index + 1)),
+        h('span', { className: 'dc-chip-name', title: slug }, slug),
+        h('button', {
+          type: 'button', className: 'dc-btn dc-btn-xs', disabled: busy || index === 0,
+          onClick: () => onMove(slug, -1), title: t.up, 'aria-label': `${t.up}: ${slug}`,
+        }, '↑'),
+        h('button', {
+          type: 'button', className: 'dc-btn dc-btn-xs', disabled: busy || index === total - 1,
+          onClick: () => onMove(slug, 1), title: t.down, 'aria-label': `${t.down}: ${slug}`,
+        }, '↓'),
+        h('button', {
+          type: 'button', className: 'dc-btn dc-btn-xs', disabled: busy,
+          onClick: () => onRemove(slug), title: t.remove, 'aria-label': `${t.remove}: ${slug}`,
+        }, '×'),
       )
     }
 
     function Panel(props) {
       const [lang, setLang] = React.useState(langFromStorage)
       const [data, setData] = React.useState(props && props.initialData ? props.initialData : null)
-      const [error, setError] = React.useState(null)
-      const [notice, setNotice] = React.useState(null)
+      const [selectedId, setSelectedId] = React.useState(props && props.initialModel ? props.initialModel : null)
       const [busy, setBusy] = React.useState(null)
-      const [expanded, setExpanded] = React.useState(props && props.initialExpanded ? props.initialExpanded : null)
+      const [notice, setNotice] = React.useState(null)
+      const [result, setResult] = React.useState(null)
+      const [error, setError] = React.useState(null)
+      const busyRef = React.useRef(null)
       const t = TEXT[lang]
+
+      React.useEffect(() => { busyRef.current = busy }, [busy])
 
       const reload = React.useCallback(async () => {
         try {
@@ -454,7 +519,7 @@ window.__ModuleLoader__.load({
           setError(null)
           return next
         } catch (failure) {
-          setError(String(failure?.message || failure))
+          setError(String(failure && failure.message ? failure.message : failure))
           return null
         }
       }, [])
@@ -464,197 +529,363 @@ window.__ModuleLoader__.load({
         let timer = null
         const tick = async () => {
           if (!alive) return
-          try {
-            const next = await api('/state')
-            if (alive) {
-              setData(next)
-              setError(null)
-            }
-          } catch (failure) {
-            if (alive) setError(String(failure?.message || failure))
-          } finally {
-            if (alive) timer = setTimeout(tick, 2500)
-          }
+          const hidden = typeof document !== 'undefined' && document.visibilityState === 'hidden'
+          if (!busyRef.current && !hidden) await reload()
+          if (alive) timer = setTimeout(tick, 4000)
         }
         tick()
         return () => {
           alive = false
           if (timer) clearTimeout(timer)
         }
-      }, [])
+      }, [reload])
 
-      const setLanguage = (next) => {
-        setLang(next)
-        try {
-          window.localStorage.setItem('dsh-cline.lang', next)
-        } catch {
-          // ignore
-        }
-      }
-
-      const run = async (key, operation, describe) => {
-        setBusy(key)
-        setNotice(null)
-        try {
-          const result = await operation()
-          if (describe) setNotice({ tone: 'ok', text: describe(result) })
-          await reload()
-        } catch (failure) {
-          setNotice({ tone: 'bad', text: String(failure?.message || failure) })
-        } finally {
-          setBusy(null)
-        }
-      }
-
-      const probe = (model) => run(`probe:${model.id}`, () => api('/probe', { model: model.id }),
-        (result) => `${t.probeDone}: ${result.pipeline || t.unknown} · ${result.upstreams?.length || 0} ${t.channels} · ${result.ms} ms`)
-
-      const validate = (model) => run(`validate:${model.id}`, () => api('/validate', { model: model.id }),
-        (result) => `${t.validateDone}: ${result.summary?.ok || 0} ${t.statusOk} / ${result.summary?.limited || 0} ${t.statusLimited} / ${result.summary?.bad || 0} ${t.statusBad}`)
-
-      const test = async (model) => {
-        setBusy(`test:${model.id}`)
-        setNotice(null)
-        try {
-          const result = await apiRaw('/test', { model: model.id })
-          if (!result.json.ok) {
-            setNotice({ tone: 'bad', text: `${t.test} ${t.requestFailed}: ${result.json.error || 'unknown'}` })
-            return
-          }
-          const target = (model.cfg?.upstreams || [])[0] || null
-          const actual = result.json.actual || null
-          const hit = !target || actual === target
-          setNotice({
-            tone: hit ? 'ok' : 'warn',
-            text: `${hit ? '✔' : '⚠'} ${t.actual} ${actual || t.unknown}${target ? ` · ${t.target} ${target}` : ''} · ${result.json.ms} ms · ${t.trace}: ${(result.json.trace || []).map((step) => `${step.upstream || 'auto'}(${step.status})`).join(' → ')}`,
-          })
-          await reload()
-        } catch (failure) {
-          setNotice({ tone: 'bad', text: String(failure?.message || failure) })
-        } finally {
-          setBusy(null)
-        }
-      }
-
-      const saveCfg = async (model, patch) => {
-        const cfg = model.cfg || { upstreams: [], exclude: [], pinMode: 'strict', sort: null }
-        try {
-          await api('/config', {
-            model: model.id,
-            upstreams: patch.upstreams ?? cfg.upstreams ?? [],
-            exclude: patch.exclude ?? cfg.exclude ?? [],
-            pinMode: patch.pinMode ?? cfg.pinMode ?? 'strict',
-            sort: patch.sort !== undefined ? patch.sort : cfg.sort,
-          })
-          await reload()
-        } catch (failure) {
-          setNotice({ tone: 'bad', text: String(failure?.message || failure) })
-        }
-      }
-
-      const toggleEnabled = () => run('enabled', () => api('/enabled', { enabled: !(data && data.enabled) }),
-        (result) => result.enabled ? t.enabled : t.disabled)
-
-      const rows = React.useMemo(() => {
+      const models = React.useMemo(() => {
         const map = new Map()
-        for (const id of data?.modelIds || []) {
-          map.set(id, {
-            id,
-            pipeline: null,
-            canonicalSlug: null,
-            upstreams: [],
-            cfg: { upstreams: [], exclude: [], pinMode: 'strict', sort: null },
-            last: null,
-            requests: 0,
-            errors: 0,
-          })
+        for (const id of (data && data.modelIds) || []) {
+          if (typeof id === 'string' && id) map.set(id, emptyModel(id))
         }
-        for (const model of data?.models || []) {
+        for (const model of (data && data.models) || []) {
+          if (!model || typeof model.id !== 'string') continue
           map.set(model.id, {
-            ...map.get(model.id),
+            ...emptyModel(model.id),
             ...model,
-            cfg: model.cfg || { upstreams: [], exclude: [], pinMode: 'strict', sort: null },
+            cfg: normalizeCfg(model.cfg),
             upstreams: Array.isArray(model.upstreams) ? model.upstreams : [],
+            history: Array.isArray(model.history) ? model.history : [],
           })
         }
         return [...map.values()].sort((left, right) => left.id.localeCompare(right.id))
       }, [data])
 
-      const summary = data?.summary || {}
+      const current = models.find((model) => model.id === selectedId) || models[0] || null
 
-      return h('section', { style: S.card, 'aria-label': t.title },
-        h('div', { style: S.header },
-          h('div', { style: S.grow },
-            h('div', { style: S.title }, t.title),
-            h('div', { style: S.subtitle }, t.subtitle),
-            h('div', { style: { ...S.small, marginTop: 4 } },
-              h('span', { style: S.mono }, data?.gateway || 'https://api.cline.bot/api/v1'),
-              data ? h('span', null, ` · ${data.llmProvider || 'cline'}`) : null,
-            ),
+      React.useEffect(() => {
+        if (current && current.id !== selectedId) setSelectedId(current.id)
+      }, [current && current.id])
+
+      const run = async (key, operation, describe) => {
+        setBusy(key)
+        setNotice(null)
+        setResult(null)
+        try {
+          const value = await operation()
+          if (describe) setNotice({ tone: 'ok', text: describe(value) })
+          await reload()
+        } catch (failure) {
+          setNotice({ tone: 'bad', text: String(failure && failure.message ? failure.message : failure) })
+        } finally {
+          setBusy(null)
+        }
+      }
+
+      const save = async (patch, successText) => {
+        if (!current) return
+        setBusy('save')
+        setNotice(null)
+        try {
+          const cfg = current.cfg
+          await api('/config', {
+            model: current.id,
+            upstreams: patch.upstreams !== undefined ? patch.upstreams : cfg.upstreams,
+            exclude: patch.exclude !== undefined ? patch.exclude : cfg.exclude,
+            pinMode: patch.pinMode !== undefined ? patch.pinMode : cfg.pinMode,
+            sort: patch.sort !== undefined ? patch.sort : cfg.sort,
+          })
+          await reload()
+          if (successText) setNotice({ tone: 'ok', text: successText })
+        } catch (failure) {
+          setNotice({ tone: 'bad', text: `${t.saveFailed}: ${String(failure && failure.message ? failure.message : failure)}` })
+        } finally {
+          setBusy(null)
+        }
+      }
+
+      const probe = () => {
+        if (!current) return
+        return run('probe', () => api('/probe', { model: current.id }),
+          (value) => `${t.probeDone}: ${value.pipeline || t.unknown} · ${(value.upstreams || []).length} ${t.channels} · ${value.ms} ${t.ms}`)
+      }
+
+      const validate = () => {
+        if (!current) return
+        return run('validate', () => api('/validate', { model: current.id }),
+          (value) => `${t.validateDone}: ${value.summary.ok || 0} ${t.statusOk}, ${value.summary.limited || 0} ${t.statusLimited}, ${value.summary.bad || 0} ${t.statusBad}`)
+      }
+
+      const test = async () => {
+        if (!current) return
+        setBusy('test')
+        setNotice(null)
+        setResult(null)
+        try {
+          const raw = await apiRaw('/test', { model: current.id })
+          setResult(raw.json)
+          await reload()
+        } catch (failure) {
+          setNotice({ tone: 'bad', text: `${t.testFailedReq}: ${String(failure && failure.message ? failure.message : failure)}` })
+        } finally {
+          setBusy(null)
+        }
+      }
+
+      const pin = (slug) => {
+        if (!current) return
+        const cfg = current.cfg
+        const pinned = cfg.upstreams.includes(slug)
+        let upstreams
+        if (pinned) upstreams = cfg.upstreams.filter((value) => value !== slug)
+        else if (cfg.pinMode === 'preferred') upstreams = [...cfg.upstreams, slug]
+        else upstreams = [slug]
+        const exclude = cfg.exclude.filter((value) => value !== slug)
+        const modeName = cfg.pinMode === 'preferred' ? t.modePreferred : t.modeStrict
+        save({ upstreams, exclude }, pinned ? `${t.unpin}: ${slug}` : `${t.pinned}: ${slug} · ${modeName}`)
+      }
+
+      const exclude = (slug) => {
+        if (!current) return
+        const cfg = current.cfg
+        const excluded = cfg.exclude.includes(slug)
+        const nextExclude = excluded ? cfg.exclude.filter((value) => value !== slug) : [...cfg.exclude, slug]
+        const nextUpstreams = excluded ? cfg.upstreams : cfg.upstreams.filter((value) => value !== slug)
+        save({ exclude: nextExclude, upstreams: nextUpstreams }, excluded ? `${t.include}: ${slug}` : `${t.excluded}: ${slug}`)
+      }
+
+      const move = (slug, delta) => {
+        if (!current) return
+        const cfg = current.cfg
+        const index = cfg.upstreams.indexOf(slug)
+        if (index < 0) return
+        const next = [...cfg.upstreams]
+        const target = index + delta
+        if (target < 0 || target >= next.length) return
+        ;[next[index], next[target]] = [next[target], next[index]]
+        save({ upstreams: next })
+      }
+
+      const clear = () => {
+        if (!current) return
+        save({ upstreams: [] }, `${t.saved}: ${t.modeAuto}`)
+      }
+
+      const setMode = (mode) => {
+        if (!current) return
+        if (mode === 'auto') return save({ upstreams: [], pinMode: 'strict' }, `${t.saved}: ${t.modeAuto}`)
+        return save({ pinMode: mode }, `${t.saved}: ${mode === 'strict' ? t.modeStrict : t.modePreferred}`)
+      }
+
+      const setSort = (value) => {
+        if (!current) return
+        save({ sort: value || null }, `${t.saved}: ${t.sort}`)
+      }
+
+      const toggleEnabled = () => run('enabled', () => api('/enabled', { enabled: !(data && data.enabled) }),
+        (value) => value.enabled ? t.enabled : t.disabled)
+
+      const summary = (data && data.summary) || {}
+      const cfg = current ? current.cfg : normalizeCfg()
+      const channels = current ? current.upstreams : []
+      const channelMap = new Map(channels.map((channel) => [channel.slug, channel]))
+      const excludedSet = new Set(cfg.exclude)
+      const ordered = [...channels].sort((left, right) => {
+        const leftPos = cfg.upstreams.indexOf(left.slug)
+        const rightPos = cfg.upstreams.indexOf(right.slug)
+        if (leftPos !== rightPos) {
+          if (leftPos === -1) return 1
+          if (rightPos === -1) return -1
+          return leftPos - rightPos
+        }
+        const rank = { ok: 0, limited: 1, unknown: 2, bad: 3, auth: 4 }
+        return (rank[left.status] ?? 2) - (rank[right.status] ?? 2) || left.slug.localeCompare(right.slug)
+      })
+      const last = current && current.last ? current.last : null
+      const lastProvider = last && last.provider ? last.provider : null
+      const modeHint = cfg.upstreams.length === 0 ? t.modeAutoHint : cfg.pinMode === 'preferred' ? t.modePreferredHint : t.modeStrictHint
+
+      const resultOk = result && result.ok === true
+      const resultTarget = result && Array.isArray(result.trace) && result.trace.length && result.trace[0].upstream
+        ? result.trace[0].upstream
+        : (cfg.upstreams[0] || null)
+      const resultActual = result && result.actual ? result.actual : null
+      const resultHit = result && result.ok ? (!resultTarget || resultActual === resultTarget) : false
+
+      return h('section', { className: 'dc-root', 'aria-label': t.title, lang: lang === 'zh' ? 'zh-CN' : 'en' },
+        h('style', { key: 'dc-style' }, CSS),
+
+        h('div', { className: 'dc-head' },
+          h('div', { className: 'dc-head-main' },
+            h('div', { className: 'dc-title' }, t.title),
+            h('div', { className: 'dc-sub' }, t.subtitle),
+            h('div', { className: 'dc-gateway' }, `${t.gateway}: ${data && data.gateway ? data.gateway : 'https://api.cline.bot/api/v1'}`),
           ),
-          h('div', { style: S.toolbar },
+          h('div', { className: 'dc-toolbar' },
             h('button', {
               type: 'button',
+              className: 'dc-switch',
+              role: 'switch',
+              'aria-checked': !!(data && data.enabled),
+              'aria-label': data && data.enabled ? t.disable : t.enable,
               disabled: !!busy || !data,
-              style: { ...S.button, ...(data?.enabled ? S.buttonOn : S.buttonDanger) },
               onClick: toggleEnabled,
-              title: data?.enabled ? t.disable : t.enable,
-            }, busy === 'enabled' ? '…' : data?.enabled ? t.enabled : t.disabled),
-            h('button', { type: 'button', disabled: !!busy, style: S.button, onClick: reload }, t.refresh),
-            h('button', { type: 'button', style: S.button, onClick: () => setLanguage(lang === 'zh' ? 'en' : 'zh') }, lang === 'zh' ? 'EN' : '中文'),
+              title: data && data.enabled ? t.disable : t.enable,
+            }, h('span', null)),
+            h('span', { className: 'dc-label' }, data && data.enabled ? t.enabled : t.disabled),
+            h('button', { type: 'button', className: 'dc-btn dc-btn-ghost dc-btn-sm', disabled: !!busy, onClick: reload }, t.refresh),
+            h('button', {
+              type: 'button',
+              className: 'dc-btn dc-btn-ghost dc-btn-sm',
+              onClick: () => setLang(lang === 'zh' ? 'en' : 'zh'),
+              title: lang === 'zh' ? 'English' : '中文',
+            }, lang === 'zh' ? 'EN' : '中文'),
           ),
         ),
 
-        h('div', { style: S.stats },
-          h('span', { style: S.stat }, `${summary.models || 0} ${t.models}`),
-          h('span', { style: S.stat }, `${summary.channels || 0} ${t.channels}`),
-          h('span', { style: S.stat }, `${summary.pinned || 0} ${t.pinned}`),
-          h('span', { style: S.stat }, `${summary.requests || 0} ${t.requests}`),
-          summary.errors ? h('span', { style: { ...S.stat, color: COLORS.danger, borderColor: COLORS.danger } }, `${summary.errors} ${t.errors}`) : null,
+        h('div', { className: 'dc-stats' },
+          h('div', { className: 'dc-stat' }, h('span', { className: 'dc-stat-v' }, String(summary.models || 0)), h('span', { className: 'dc-stat-l' }, t.models)),
+          h('div', { className: 'dc-stat' }, h('span', { className: 'dc-stat-v' }, String(summary.channels || 0)), h('span', { className: 'dc-stat-l' }, t.channels)),
+          h('div', { className: 'dc-stat' }, h('span', { className: 'dc-stat-v' }, String(summary.pinned || 0)), h('span', { className: 'dc-stat-l' }, t.pinnedCount)),
+          h('div', { className: 'dc-stat' }, h('span', { className: 'dc-stat-v' }, String(summary.requests || 0)), h('span', { className: 'dc-stat-l' }, t.requests)),
+          summary.errors ? h('div', { className: 'dc-stat' }, h('span', { className: 'dc-stat-v', style: { color: 'var(--dc-error)' } }, String(summary.errors)), h('span', { className: 'dc-stat-l' }, t.errors)) : null,
         ),
 
-        data && data.enabled === false ? h('div', { style: S.banner }, t.disabledHint) : null,
-        data && data.apiKeyConfigured === false ? h('div', { style: S.banner }, `${t.apiKeyMissing} (${data.apiKeyEnv || 'CLINE_API_KEY'})`) : null,
-        error ? h('div', { style: { ...S.banner, ...S.error } }, `${t.requestFailed}: ${error}`) : null,
-        notice ? h('div', { style: { ...S.banner, ...(notice.tone === 'ok' ? S.success : notice.tone === 'bad' ? S.error : null) } }, notice.text) : null,
+        data && data.enabled === false ? h('div', { className: 'dc-notice dc-notice-warn' }, t.disabledHint) : null,
+        data && data.apiKeyConfigured === false
+          ? h('div', { className: 'dc-notice dc-notice-warn' }, `${t.keyMissing} (${(data && data.apiKeyEnv) || 'CLINE_API_KEY'})`)
+          : null,
+        data && data.interceptor && data.interceptor !== 'installed'
+          ? h('div', { className: 'dc-notice dc-notice-warn' }, `${t.interceptorWarn}: ${data.interceptor}`)
+          : null,
+        error
+          ? h('div', { className: 'dc-notice dc-notice-bad' },
+            `${t.requestFailed}: ${error}`,
+            h('div', { className: 'dc-meta', style: { marginTop: 4 } },
+              `${t.diagHint}: GET ${(PAGE_IS_HTTP ? '' : TRANSPORT_ORIGIN)}${API}/diag`))
+          : null,
+        notice ? h('div', { className: `dc-notice dc-notice-${notice.tone === 'ok' ? 'ok' : notice.tone === 'warn' ? 'warn' : 'bad'}` }, notice.text) : null,
 
         !data
-          ? h('div', { style: { ...S.small, marginTop: 14 } }, t.loading)
-          : rows.length === 0
-            ? h('div', { style: { ...S.small, marginTop: 14 } }, t.noRows)
-            : h('div', { style: S.tableWrap },
-              h('table', { style: S.table },
-                h('thead', null,
-                  h('tr', null,
-                    h('th', { style: S.th }, t.model),
-                    h('th', { style: S.th }, t.canonical),
-                    h('th', { style: S.th }, t.channels),
-                    h('th', { style: S.th }, t.targets),
-                    h('th', { style: S.th }, t.mode),
-                    h('th', { style: S.th }, t.sort),
-                    h('th', { style: S.th }, t.last),
-                    h('th', { style: S.th }, t.actions),
+          ? h('div', { className: 'dc-empty' }, t.loading)
+          : models.length === 0
+            ? h('div', { className: 'dc-empty' }, t.noModels)
+            : h(React.Fragment, null,
+              h('div', { className: 'dc-picker' },
+                h('span', { className: 'dc-label' }, t.model),
+                h('select', {
+                  className: 'dc-select',
+                  value: current ? current.id : '',
+                  onChange: (event) => setSelectedId(event.target.value),
+                  'aria-label': t.chooseModel,
+                }, models.map((model) => h('option', { key: model.id, value: model.id }, model.id))),
+                h(PipelineBadge, { pipeline: current && current.pipeline, t }),
+                current && current.canonicalSlug ? h('span', { className: 'dc-meta' }, current.canonicalSlug) : null,
+                h('span', { className: 'dc-spacer' }),
+                h('div', { className: 'dc-row' },
+                  h('button', { type: 'button', className: `dc-btn dc-btn-sm${channels.length ? '' : ' dc-btn-primary'}`, disabled: !!busy, onClick: probe }, busy === 'probe' ? t.probing : t.probe),
+                  h('button', { type: 'button', className: 'dc-btn dc-btn-sm', disabled: !!busy || !channels.length, onClick: validate }, busy === 'validate' ? t.validating : t.validate),
+                  h('button', { type: 'button', className: 'dc-btn dc-btn-sm', disabled: !!busy, onClick: test }, busy === 'test' ? t.testing : t.test),
+                ),
+              ),
+
+              h('div', { className: 'dc-row', style: { marginTop: 10 } },
+                h('span', { className: 'dc-label' }, t.lastActual),
+                lastProvider ? h('span', { className: 'dc-code' }, lastProvider) : h('span', { className: 'dc-meta' }, t.notProbed),
+                last ? h('span', { className: 'dc-meta' }, `${last.ms || 0} ${t.ms}`) : null,
+                last && last.at ? h('span', { className: 'dc-meta' }, fmtTime(last.at)) : null,
+                last && Array.isArray(last.attempts) && last.attempts.length > 1
+                  ? h('span', { className: 'dc-meta' }, `${t.attempts}: ${last.attempts.join(' → ')}`)
+                  : null,
+                last && last.error ? h('span', { className: 'dc-meta', style: { color: 'var(--dc-error)' } }, String(last.error).slice(0, 140)) : null,
+              ),
+
+              h('div', { className: 'dc-section' },
+                h('div', { className: 'dc-section-head' },
+                  h('span', { className: 'dc-section-title' }, t.pinnedOrder),
+                  h('span', { className: 'dc-spacer' }),
+                  h('span', { className: 'dc-label' }, t.mode),
+                  h('div', { className: 'dc-seg', role: 'group', 'aria-label': t.mode },
+                    h('button', {
+                      type: 'button', 'aria-pressed': cfg.upstreams.length === 0,
+                      disabled: !!busy, onClick: () => setMode('auto'),
+                    }, t.modeAuto),
+                    h('button', {
+                      type: 'button', 'aria-pressed': cfg.upstreams.length > 0 && cfg.pinMode === 'strict',
+                      disabled: !!busy, onClick: () => setMode('strict'),
+                    }, t.modeStrict),
+                    h('button', {
+                      type: 'button', 'aria-pressed': cfg.upstreams.length > 0 && cfg.pinMode === 'preferred',
+                      disabled: !!busy, onClick: () => setMode('preferred'),
+                    }, t.modePreferred),
+                  ),
+                  h('span', { className: 'dc-label' }, t.sort),
+                  h('select', {
+                    className: 'dc-select',
+                    style: { height: 30, minWidth: 150, fontSize: 12 },
+                    value: cfg.sort || '',
+                    disabled: !!busy,
+                    onChange: (event) => setSort(event.target.value),
+                    'aria-label': t.sort,
+                  },
+                  h('option', { value: '' }, t.sortSmart),
+                  h('option', { value: 'cost' }, t.sortCost),
+                  h('option', { value: 'ttft' }, t.sortTtft),
+                  h('option', { value: 'tps' }, t.sortTps)),
+                ),
+                h('div', { className: 'dc-pinned' },
+                  cfg.upstreams.length === 0
+                    ? h('span', { className: 'dc-hint' }, t.noPinned)
+                    : cfg.upstreams.map((slug, index) => h(PinChip, {
+                      key: slug, slug, index, total: cfg.upstreams.length, t, busy: !!busy,
+                      onMove: move, onRemove: pin,
+                    })),
+                  h('span', { className: 'dc-spacer' }),
+                  cfg.upstreams.length
+                    ? h('button', { type: 'button', className: 'dc-btn dc-btn-sm dc-btn-ghost', disabled: !!busy, onClick: clear }, t.clear)
+                    : null,
+                ),
+                h('div', { className: 'dc-hint', style: { marginBottom: 10 } }, modeHint),
+                channels.length === 0
+                  ? h('div', { className: 'dc-empty' }, t.noChannels)
+                  : h('div', { className: 'dc-list' }, ordered.map((channel) => h(ChannelRow, {
+                    key: channel.slug,
+                    channel,
+                    position: cfg.upstreams.indexOf(channel.slug),
+                    excluded: excludedSet.has(channel.slug),
+                    t,
+                    busy: !!busy,
+                    busyKey: busy,
+                    onPin: pin,
+                    onExclude: exclude,
+                  }))),
+              ),
+
+              result ? h('div', { className: `dc-result ${resultOk ? 'dc-result-ok' : 'dc-result-bad'}` },
+                h('div', { className: 'dc-result-body' },
+                  h('div', { className: 'dc-result-main' },
+                    resultOk
+                      ? `${resultHit ? '✓' : '⚠'} ${t.actual}: ${resultActual || t.unknown}${resultTarget ? ` · ${t.target}: ${resultTarget}` : ''}`
+                      : `✕ ${t.testFailedReq}: ${String(result.error || t.unknown).slice(0, 180)}`),
+                  h('div', { className: 'dc-meta-line' },
+                    result.ms ? h('span', { className: 'dc-meta' }, `${result.ms} ${t.ms}`) : null,
+                    h('span', { className: 'dc-meta' }, `${t.attempts}: ${(result.trace || []).map((step) => `${step.upstream || 'auto'}(${step.status})`).join(' → ') || '—'}`),
+                    result.note ? h('span', { className: 'dc-meta' }, result.note) : null,
                   ),
                 ),
-                h('tbody', null,
-                  rows.map((model) => h(ModelRow, {
-                    key: model.id,
-                    model,
-                    lang,
-                    busy,
-                    expanded: expanded === model.id,
-                    onToggle: (id) => setExpanded(expanded === id ? null : id),
-                    onProbe: probe,
-                    onValidate: validate,
-                    onTest: test,
-                    onCfg: saveCfg,
-                    t,
-                  })),
-                ),
+              ) : null,
+
+              h('details', { className: 'dc-history' },
+                h('summary', null, `${t.history} (${(current && current.history ? current.history.length : 0)})`),
+                (current && current.history && current.history.length)
+                  ? current.history.slice(0, 8).map((item, index) => h('div', { className: 'dc-history-row', key: `${item.at || index}-${index}` },
+                    h('span', { className: 'dc-meta' }, fmtTime(item.at)),
+                    h('span', { className: 'dc-code dc-truncate', title: item.provider || '' }, item.provider || t.unknown),
+                    h('span', { className: 'dc-meta' }, `${item.ms || 0} ${t.ms}`),
+                    h('span', { className: 'dc-meta dc-truncate', title: (item.attempts || []).join(' → ') }, (item.attempts || []).join(' → ') || '—'),
+                  ))
+                  : h('div', { className: 'dc-empty' }, t.noHistory),
               ),
             ),
 
-        h('div', { style: { ...S.small, marginTop: 12 } }, t.probeCost),
+        h('div', { className: 'dc-footer' }, t.probeCost),
       )
     }
 
@@ -670,8 +901,8 @@ window.__ModuleLoader__.load({
 
       render() {
         if (this.state.error) {
-          return h('div', { style: { ...S.card, ...S.error } },
-            `Cline upstream panel failed: ${String(this.state.error?.message || this.state.error)}`)
+          return h('div', { className: 'dc-notice dc-notice-bad', style: { marginTop: 24, padding: 16, border: '1px solid currentColor', borderRadius: 10 } },
+            `Cline upstream panel failed: ${String(this.state.error && this.state.error.message ? this.state.error.message : this.state.error)}`)
         }
         return this.props.children
       }
@@ -684,7 +915,7 @@ window.__ModuleLoader__.load({
           name: 'settings.models.footer',
           id: 'dsh-cline',
           order: 20,
-        }, (props) => h(Boundary, null, h(Panel, props || {}))))
+        }, (slotProps) => h(Boundary, null, h(Panel, slotProps || {}))))
       },
     }
   },

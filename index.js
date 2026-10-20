@@ -32,6 +32,19 @@ const PKG = 'dsh-cline'
 const API_PREFIX = '/dsh-cline'
 const OR_API = 'https://openrouter.ai/api/v1'
 
+// Runtime facts the panel's diagnostics route reports. Nothing here is durable.
+const diagnostics = {
+  interceptor: 'starting',
+  gatewayRequests: 0,
+  intercepted: 0,
+  lastInterceptAt: null,
+  lastInterceptError: null,
+  lastRouteAt: null,
+}
+
+// The bearer token observed on gateway traffic, kept in memory only.
+let capturedAuth = null
+
 const DEFAULTS = {
   enabled: true,
   gatewayBase: 'https://api.cline.bot/api/v1',
@@ -431,8 +444,9 @@ async function proxyRequest(previous, request, bodyObject, state, config, ctx) {
   const modelId = String(bodyObject.model || '')
   if (!modelId.startsWith(config.modelPrefix)) return previous(request.input, request.init)
 
+  diagnostics.gatewayRequests += 1
   const authorization = request.headers.get('authorization')
-  if (authorization) state.lastAuth = authorization.replace(/^Bearer\s+/i, '').trim()
+  if (authorization) capturedAuth = authorization.replace(/^Bearer\s+/i, '').trim()
 
   const meta = state.model(modelId)
   const attempts = buildAttempts(meta.cfg)
@@ -570,7 +584,10 @@ async function proxyRequest(previous, request, bodyObject, state, config, ctx) {
 
 function installFetch(ctx, state, config) {
   const previous = globalThis.fetch
-  if (typeof previous !== 'function') return () => {}
+  if (typeof previous !== 'function') {
+    diagnostics.interceptor = 'unavailable: no global fetch'
+    return () => {}
+  }
 
   let disposed = false
   const wrapper = async function dshClineFetch(input, init) {
@@ -586,19 +603,24 @@ function installFetch(ctx, state, config) {
         return previous(input, init)
       }
       if (!bodyObject || typeof bodyObject !== 'object') return previous(input, init)
+      diagnostics.intercepted += 1
+      diagnostics.lastInterceptAt = Date.now()
       return await proxyRequest(previous, request, bodyObject, state, config, ctx)
     } catch (error) {
+      diagnostics.lastInterceptError = String(error?.stack || error).slice(0, 500)
       log(ctx, config, `interceptor fallback: ${String(error?.message || error)}`)
       return previous(input, init)
     }
   }
 
   globalThis.fetch = wrapper
+  diagnostics.interceptor = 'installed'
   log(ctx, config, 'fetch interceptor installed')
 
   return () => {
     disposed = true
     if (globalThis.fetch === wrapper) globalThis.fetch = previous
+    diagnostics.interceptor = 'removed'
     log(ctx, config, 'fetch interceptor removed')
   }
 }
@@ -613,7 +635,7 @@ async function resolveKey(ctx, state, config) {
   } catch {
     // The credentials service may be absent; fall through.
   }
-  if (state.lastAuth) return state.lastAuth
+  if (capturedAuth) return capturedAuth
   const environment = process.env[config.apiKeyEnv]
   return environment || null
 }
@@ -873,7 +895,7 @@ async function credentialConfigured(ctx, state, config) {
   } catch {
     // fall through
   }
-  return !!(state.lastAuth || process.env[config.apiKeyEnv])
+  return !!(capturedAuth || process.env[config.apiKeyEnv])
 }
 
 async function stateResponse(ctx, state, config) {
@@ -905,12 +927,50 @@ async function stateResponse(ctx, state, config) {
     modelIds: await modelIds(ctx, state, config),
     models,
     summary: summarize(state.data.models),
+    interceptor: diagnostics.interceptor,
     version: 1,
   }
 }
 
 function isLoopback(address) {
-  return address === '127.0.0.1' || address === '::1' || address === '::ffff:127.0.0.1'
+  if (!address) return true // in-process / IPC bridge: no socket is a trusted local caller
+  const value = String(address)
+  return value === '127.0.0.1'
+    || value === '::1'
+    || value === '::ffff:127.0.0.1'
+    || value.startsWith('127.')
+    || value.startsWith('::ffff:127.')
+}
+
+function isLocalOrigin(origin) {
+  if (!origin) return true
+  if (origin === 'null' || origin === 'file://') return true
+  try {
+    const parsed = new URL(origin)
+    if (parsed.protocol === 'file:') return true
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return true
+    const host = parsed.hostname
+    return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]' || host.startsWith('127.')
+  } catch {
+    return false
+  }
+}
+
+/**
+ * CORS for the harness page. The Desktop renderer loads over file:// and reaches
+ * the Host by absolute origin, so its POSTs are cross-origin and preflighted.
+ * Non-local web origins are refused rather than reflected.
+ */
+function applyCORS(request, response) {
+  const origin = request.headers.origin
+  if (!origin) return true
+  if (!isLocalOrigin(origin)) return false
+  response.setHeader('access-control-allow-origin', origin === 'null' ? 'null' : origin)
+  response.setHeader('access-control-allow-methods', 'GET,POST,OPTIONS')
+  response.setHeader('access-control-allow-headers', 'content-type,accept')
+  response.setHeader('access-control-max-age', '600')
+  response.setHeader('vary', 'origin')
+  return true
 }
 
 function sendJSON(response, status, value) {
@@ -952,9 +1012,12 @@ async function parseJSONBody(request) {
 function sameOrigin(request) {
   const origin = request.headers.origin
   if (!origin) return true
+  if (origin === 'null' || origin === 'file://') return true
   try {
     const parsed = new URL(origin)
-    return parsed.host === request.headers.host
+    if (parsed.protocol === 'file:') return true
+    if (parsed.host === request.headers.host) return true
+    return isLocalOrigin(origin)
   } catch {
     return false
   }
@@ -962,9 +1025,17 @@ function sameOrigin(request) {
 
 function registerRoutes(ctx, state, config) {
   const handler = async (request, response) => {
+    diagnostics.lastRouteAt = Date.now()
     try {
       if (!config.allowRemote && !isLoopback(request.socket?.remoteAddress)) {
         return sendJSON(response, 403, { ok: false, error: 'loopback only' })
+      }
+      if (!applyCORS(request, response)) {
+        return sendJSON(response, 403, { ok: false, error: 'cross-origin request refused' })
+      }
+      if (request.method === 'OPTIONS') {
+        response.writeHead(204)
+        return response.end()
       }
       if (!sameOrigin(request)) {
         return sendJSON(response, 403, { ok: false, error: 'cross-origin request refused' })
@@ -974,6 +1045,26 @@ function registerRoutes(ctx, state, config) {
 
       if (request.method === 'GET' && (action === '' || action === 'state')) {
         return sendJSON(response, 200, await stateResponse(ctx, state, config))
+      }
+
+      if (request.method === 'GET' && action === 'diag') {
+        return sendJSON(response, 200, {
+          ok: true,
+          interceptor: diagnostics.interceptor,
+          gatewayRequests: diagnostics.gatewayRequests,
+          intercepted: diagnostics.intercepted,
+          lastInterceptAt: diagnostics.lastInterceptAt,
+          lastInterceptError: diagnostics.lastInterceptError,
+          lastRouteAt: diagnostics.lastRouteAt,
+          stateFile: state.file,
+          process: { pid: process.pid, platform: process.platform, node: process.version },
+          config: {
+            gatewayBase: config.gatewayBase,
+            modelPrefix: config.modelPrefix,
+            llmProvider: config.llmProvider,
+            allowRemote: config.allowRemote,
+          },
+        })
       }
 
       if (request.method === 'POST' && action === 'enabled') {

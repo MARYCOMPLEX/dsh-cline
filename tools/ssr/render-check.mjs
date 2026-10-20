@@ -100,7 +100,7 @@ const fixture = {
 // initial state so the table path renders without effects.
 const html = renderToString(React.createElement(registration.Component, {
   initialData: fixture,
-  initialExpanded: fixture.models[0].id,
+  initialModel: fixture.models[0].id,
 }))
 
 const checks = {
@@ -109,10 +109,13 @@ const checks = {
   gateway: html.includes('api.cline.bot'),
   pipelineBadge: html.includes('planner · Vercel'),
   channel: html.includes('alibaba'),
-  excludedChannel: html.includes('fireworks'),
-  targetList: html.includes('1. alibaba'),
-  lastActual: html.includes('812 ms'),
-  summary: html.includes('4') && html.includes('12'),
+  pinnedChip: html.includes('dc-chip-name'),
+  pinButton: html.includes('>钉住<'),
+  modeSegments: html.includes('严格钉住') && html.includes('优先 + 回退'),
+  statusLimited: html.includes('限流'),
+  lastActual: html.includes('最近实际'),
+  tokenOnly: html.includes('--dsw-alias-label-primary') && !html.includes('#171a21'),
+  summary: html.includes('dc-stat'),
 }
 console.log(JSON.stringify(checks, null, 2))
 
@@ -124,7 +127,7 @@ storage.delete('dsh-cline.lang')
 console.log(JSON.stringify({
   enTitle: english.includes('Cline Upstreams'),
   disabledBanner: english.includes('Plugin disabled'),
-  keyBanner: english.includes('Upstream credential not detected'),
+  keyBanner: english.includes('No upstream credential detected'),
 }, null, 2))
 
 if (!checks.zhTitle || !checks.pipelineBadge || !checks.channel) {
