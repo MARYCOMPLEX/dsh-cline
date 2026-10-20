@@ -53,7 +53,7 @@ dsh plugin --profile desktop add github:MARYCOMPLEX/dsh-cline
 也可以锁定版本或分支：
 
 ```powershell
-dsh plugin --profile desktop add github:MARYCOMPLEX/dsh-cline#v1.3.1
+dsh plugin --profile desktop add github:MARYCOMPLEX/dsh-cline#v1.4.0
 ```
 
 更新到最新：
@@ -134,15 +134,37 @@ config:
 
 ---
 
+## 网关请求日志
+
+插件在同一个 fetch 包装器上顺带记录**所有**模型调用，不只 Cline：
+
+- 命中 `POST` + JSON body 带 `model` + 推理路径（`/chat/completions`、`/responses`、`/completions`、`/messages`）的请求；
+- 其他提供商（DeepSeek 官方、OpenAI、Anthropic…）**只记录、不改写**；
+- Cline 请求额外写入 `target`（钉住目标）、`attempts`（逐次尝试）和 `upstream`（实际渠道）；
+- 每条记录含：时间、提供商、模型、端点、HTTP 状态、耗时、是否流式、usage（prompt/completion/total/cached）、请求 ID、错误摘要；
+- 内存环形缓冲 200 条，不落盘、不存正文和密钥。
+
+界面位置：
+
+- **设置 → 模型 → Cline 上游 → 网关请求日志**：可筛选「全部 / 仅 Cline / 仅失败」，支持清空；
+- **输入框下方的状态条**：新增一个 `上游 <渠道>` 小胶囊，5 秒刷新，绿色=命中目标、黄色=实际与目标不同、红色=失败。点开设置页可看完整日志。
+
+> 日志是观测层：即使不钉任何渠道、甚至换成别家 provider，也会出现在日志里；只有 Cline 的行会带「实际上游」。
+
+---
+
 ## 面板 HTTP 接口
 
 同源或本机来源、支持 CORS 预检、1 MB 请求体上限：
 
 | 方法 | 路径 | 作用 |
 |---|---|---|
-| GET | `/dsh-cline/state` | 配置 + 渠道 + 最近实际 + 模型清单 |
+| GET | `/dsh-cline/state` | 配置 + 渠道 + 最近实际 + 模型清单 + 日志条数 |
+| GET | `/dsh-cline/status` | 最近一条请求（给输入框状态条用） |
+| GET | `/dsh-cline/logs` | 请求日志，支持 `limit/provider/model/upstream/onlyCline/onlyErrors` |
+| POST | `/dsh-cline/logs/clear` | 清空日志 |
 | GET | `/dsh-cline/diag` | 拦截器状态、网关请求计数、状态文件路径 |
-| GET | `/dsh-cline/history` | 最近 100 条请求记录 |
+| GET | `/dsh-cline/history` | 最近 100 条 Cline 请求记录 |
 | POST | `/dsh-cline/config` | `{model, upstreams, exclude, pinMode, sort}` |
 | POST | `/dsh-cline/probe` | `{model}` → 管道 + 渠道清单 |
 | POST | `/dsh-cline/validate` | `{model}` → 全渠道可用性 |
@@ -176,7 +198,7 @@ pi-ai adapter → OpenAI SDK → globalThis.fetch
 ## 验证
 
 ```powershell
-node --test dsh-cline/test          # 36 个纯函数 / 拦截器单测
+node --test dsh-cline/test          # 40 个纯函数 / 拦截器 / 日志单测
 node dsh-cline/tools/live-probe.mjs # 实网：判管道、枚举、钉住、流式、direct 管道
 node dsh-cline/tools/live-interceptor.mjs [model] [a,b]  # 实网：走真实拦截链路
 ```

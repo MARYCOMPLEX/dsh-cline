@@ -50,6 +50,7 @@ const plugin = registered.factory((id) => {
 })
 
 let captured = null
+const registrations = []
 const ctx = {
   slots: {
     inject(name, callback) {
@@ -57,14 +58,16 @@ const ctx = {
       callback()
     },
     register(options, Component) {
-      captured = { options, Component }
-      return captured
+      const entry = { options, Component }
+      registrations.push(entry)
+      if (options.name === 'settings.models.footer') captured = entry
+      return entry
     },
   },
 }
 plugin.apply(ctx)
 const registration = captured
-if (!registration) throw new Error('no slot registration captured')
+if (!registration) throw new Error('no settings.models.footer registration captured')
 
 const fixture = {
   ok: true,

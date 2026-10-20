@@ -24,12 +24,13 @@ import {
   pinBody,
   probeBody,
   resolveProviderSlug,
+  slugify,
   summarize,
   uniq,
 } from './core.js'
 
 const PKG = 'dsh-cline'
-const VERSION = '1.3.1'
+const VERSION = '1.4.0'
 const API_PREFIX = '/dsh-cline'
 const OR_API = 'https://openrouter.ai/api/v1'
 
@@ -187,6 +188,138 @@ class Store {
   }
 }
 
+/**
+ * Provider-agnostic request log. Kept in memory: it is an observability view,
+ * not durable session state, and writing every gateway call to disk would be
+ * more expensive than the thing it measures.
+ */
+class LogBook {
+  constructor(limit = 200) {
+    this.limit = limit
+    this.entries = []
+    this.counter = 0
+  }
+
+  push(entry) {
+    this.counter += 1
+    this.entries.unshift({
+      id: `${Date.now().toString(36)}-${this.counter.toString(36)}`,
+      at: Date.now(),
+      ...entry,
+    })
+    if (this.entries.length > this.limit) this.entries.length = this.limit
+  }
+
+  list(query = {}) {
+    const limit = Math.min(Math.max(Number(query.limit) || 50, 1), this.limit)
+    let entries = this.entries
+    if (query.provider) entries = entries.filter((entry) => entry.provider === query.provider)
+    if (query.model) entries = entries.filter((entry) => String(entry.model || '').includes(query.model))
+    if (query.upstream) entries = entries.filter((entry) => String(entry.upstream || '').includes(query.upstream))
+    if (query.onlyCline === '1' || query.onlyCline === 'true') entries = entries.filter((entry) => entry.provider === 'cline')
+    if (query.onlyErrors === '1' || query.onlyErrors === 'true') entries = entries.filter((entry) => !!entry.error || Number(entry.status) >= 400)
+    return entries.slice(0, limit)
+  }
+
+  clear() {
+    this.entries = []
+  }
+}
+
+const logBook = new LogBook(200)
+
+const PROVIDER_HOSTS = {
+  'api.cline.bot': 'cline',
+  'api.deepseek.com': 'deepseek',
+  'api.openai.com': 'openai',
+  'api.anthropic.com': 'anthropic',
+  'openrouter.ai': 'openrouter',
+  'generativelanguage.googleapis.com': 'google',
+  'api.moonshot.cn': 'moonshot',
+  'dashscope.aliyuncs.com': 'dashscope',
+  'open.bigmodel.cn': 'zhipu',
+  'api.minimax.chat': 'minimax',
+}
+
+const LLM_PATH_SUFFIXES = ['/chat/completions', '/responses', '/completions', '/messages']
+
+function providerFromUrl(url) {
+  try {
+    const host = new URL(url).hostname
+    return PROVIDER_HOSTS[host] || host
+  } catch {
+    return 'unknown'
+  }
+}
+
+function isLlmRequest(request) {
+  if (request.method !== 'POST') return false
+  if (request.headers.get('x-dsh-cline-internal')) return false
+  const contentType = request.headers.get('content-type') || ''
+  if (!contentType.includes('application/json')) return false
+  try {
+    const body = JSON.parse(request.body)
+    if (!body || typeof body.model !== 'string' || !body.model) return false
+  } catch {
+    return false
+  }
+  try {
+    const pathname = new URL(request.url).pathname
+    return LLM_PATH_SUFFIXES.some((suffix) => pathname.endsWith(suffix))
+  } catch {
+    return false
+  }
+}
+
+function extractUsage(value) {
+  const usage = value?.usage || value?.data?.usage
+  if (!usage || typeof usage !== 'object') return null
+  const prompt = Number(usage.prompt_tokens ?? usage.input_tokens ?? 0)
+  const completion = Number(usage.completion_tokens ?? usage.output_tokens ?? 0)
+  const total = Number(usage.total_tokens ?? (prompt + completion))
+  const cached = Number(usage.prompt_tokens_details?.cached_tokens
+    ?? usage.cache_read_input_tokens
+    ?? usage.input_tokens_details?.cached_tokens
+    ?? 0)
+  if (!prompt && !completion && !total) return null
+  return { prompt, completion, total, cached }
+}
+
+function extractRequestId(response, json) {
+  const headers = response?.headers
+  return headers?.get('x-request-id')
+    || headers?.get('request-id')
+    || headers?.get('openai-request-id')
+    || json?.id
+    || null
+}
+
+function parseGenericSSE(text) {
+  let provider = null
+  let model = null
+  let usage = null
+  let error = null
+  for (const line of String(text || '').split('\n')) {
+    if (!line.startsWith('data:')) continue
+    const payload = line.slice(5).trim()
+    if (!payload || payload === '[DONE]') continue
+    try {
+      const chunk = JSON.parse(payload)
+      if (typeof chunk.provider === 'string') provider = slugify(chunk.provider)
+      if (typeof chunk.model === 'string') model = chunk.model
+      if (chunk.usage) usage = extractUsage(chunk) || usage
+      if (chunk.error) error = typeof chunk.error === 'string' ? chunk.error : JSON.stringify(chunk.error)
+    } catch {
+      // Ignore non-JSON frames and tail-split lines.
+    }
+  }
+  if (!provider) {
+    const final = /"finalProvider"\s*:\s*"([^"]+)"/.exec(String(text || ''))
+    if (final) provider = final[1]
+  }
+  return { provider, model, usage, error }
+}
+
 function log(ctx, config, message) {
   if (config.debug) ctx.logger?.info?.(`[${PKG}] ${message}`)
 }
@@ -284,13 +417,12 @@ async function readCapped(response, limit) {
   return Buffer.concat(chunks).toString('utf8')
 }
 
-async function readSSETail(response) {
+async function readStreamText(response, limit = 524288) {
   const reader = response.body?.getReader()
-  if (!reader) return null
+  if (!reader) return ''
   const decoder = new TextDecoder()
   const parts = []
   let size = 0
-  const limit = 524288
   try {
     for (;;) {
       const { done, value } = await reader.read()
@@ -302,7 +434,7 @@ async function readSSETail(response) {
         size -= parts.shift().length
       }
     }
-    return parseSSEProvider(Buffer.concat(parts).toString('utf8') + decoder.decode())
+    return Buffer.concat(parts).toString('utf8') + decoder.decode()
   } finally {
     try {
       reader.releaseLock()
@@ -310,6 +442,10 @@ async function readSSETail(response) {
       // ignore
     }
   }
+}
+
+async function readSSETail(response) {
+  return parseSSEProvider(await readStreamText(response))
 }
 
 /**
@@ -453,9 +589,130 @@ function tapResponse(response, modelId, state, config, started, trace) {
       meta.last = last
       meta.requests = (meta.requests || 0) + 1
       pushHistory(meta, last, config.maxHistory)
+      logBook.push({
+        provider: 'cline',
+        model: modelId,
+        requestedModel: modelId,
+        endpoint: '/chat/completions',
+        status: last.status,
+        ms: last.ms,
+        stream: contentType.includes('text/event-stream'),
+        upstream: provider,
+        canonical: last.canonical,
+        target: last.target,
+        attempts: last.attempts,
+        error: null,
+      })
       state.save()
     })
     .catch(() => {})
+}
+
+function pushClineFailure(modelId, started, trace, status, error) {
+  logBook.push({
+    provider: 'cline',
+    model: modelId,
+    requestedModel: modelId,
+    endpoint: '/chat/completions',
+    status,
+    ms: Date.now() - started,
+    stream: false,
+    upstream: null,
+    target: trace[trace.length - 1]?.upstream || null,
+    attempts: trace.map((item) => item.upstream || 'auto'),
+    error: String(error || '').slice(0, 300) || null,
+  })
+}
+
+function tapGeneric(response, request, started) {
+  let clone
+  try {
+    clone = response.clone()
+  } catch {
+    return
+  }
+  let requestedModel = ''
+  try {
+    requestedModel = String(JSON.parse(request.body).model || '')
+  } catch {
+    // keep empty
+  }
+  let endpoint = ''
+  try {
+    endpoint = new URL(request.url).pathname
+  } catch {
+    // keep empty
+  }
+  const contentType = response.headers.get('content-type') || ''
+  const stream = contentType.includes('text/event-stream')
+  const promise = stream
+    ? readStreamText(clone).then((text) => parseGenericSSE(text))
+    : readCapped(clone, 2 * 1024 * 1024).then((text) => {
+      let json = null
+      try {
+        json = JSON.parse(text)
+      } catch {
+        json = null
+      }
+      return {
+        provider: json?.provider ? slugify(json.provider) : null,
+        model: json?.model || null,
+        usage: extractUsage(json),
+        error: extractError(json) || null,
+        json,
+      }
+    })
+  promise
+    .then((info) => {
+      const upstream = info.provider ? resolveProviderSlug(info.provider, []) : null
+      logBook.push({
+        provider: providerFromUrl(request.url),
+        model: info.model || requestedModel,
+        requestedModel,
+        endpoint,
+        status: response.status,
+        ms: Date.now() - started,
+        stream,
+        upstream,
+        requestId: extractRequestId(response, info.json),
+        usage: info.usage || null,
+        error: info.error || (response.ok ? null : `HTTP ${response.status}`),
+      })
+    })
+    .catch(() => {})
+}
+
+async function observeGeneric(previous, request, started) {
+  try {
+    const response = await previous(request.input, request.init)
+    tapGeneric(response, request, started)
+    return response
+  } catch (error) {
+    let requestedModel = ''
+    try {
+      requestedModel = String(JSON.parse(request.body).model || '')
+    } catch {
+      // keep empty
+    }
+    logBook.push({
+      provider: providerFromUrl(request.url),
+      model: requestedModel,
+      requestedModel,
+      endpoint: (() => {
+        try {
+          return new URL(request.url).pathname
+        } catch {
+          return ''
+        }
+      })(),
+      status: 0,
+      ms: Date.now() - started,
+      stream: false,
+      upstream: null,
+      error: String(error?.message || error).slice(0, 300),
+    })
+    throw error
+  }
 }
 
 async function proxyRequest(previous, request, bodyObject, state, config, ctx) {
@@ -508,8 +765,8 @@ async function proxyRequest(previous, request, bodyObject, state, config, ctx) {
     } catch (error) {
       const message = String(error?.message || error)
       trace.push({ upstream: attempt.upstream, status: 0, ms: Date.now() - started, note: message.slice(0, 160) })
-      meta.errors = (meta.errors || 0) + 1
       if (index === attempts.length - 1) {
+        meta.errors = (meta.errors || 0) + 1
         meta.last = {
           provider: null,
           at: Date.now(),
@@ -519,6 +776,7 @@ async function proxyRequest(previous, request, bodyObject, state, config, ctx) {
           target: attempt.upstream || null,
           error: message.slice(0, 300),
         }
+        pushClineFailure(modelId, started, trace, 0, message)
         state.save()
         return new Response(
           JSON.stringify({ error: { message: `upstream fetch failed: ${message}`, type: 'upstream_error' } }),
@@ -552,6 +810,7 @@ async function proxyRequest(previous, request, bodyObject, state, config, ctx) {
                 error: peek.message.slice(0, 300),
               },
             })
+            pushClineFailure(modelId, started, trace, 502, peek.message)
             return new Response(
               JSON.stringify({ error: { message: peek.message, type: 'upstream_error' } }),
               { status: 502, headers: { 'content-type': 'application/json' } },
@@ -580,6 +839,7 @@ async function proxyRequest(previous, request, bodyObject, state, config, ctx) {
               error: 'empty stream',
             },
           })
+          pushClineFailure(modelId, started, trace, 502, 'empty stream')
           return new Response(
             JSON.stringify({ error: { message: 'upstream returned an empty stream', type: 'upstream_error' } }),
             { status: 502, headers: { 'content-type': 'application/json' } },
@@ -610,6 +870,7 @@ async function proxyRequest(previous, request, bodyObject, state, config, ctx) {
           error: text.slice(0, 300),
         },
       })
+      pushClineFailure(modelId, started, trace, response.status, text)
       return rebuildResponse(text, response)
     }
   }
@@ -629,18 +890,30 @@ function installFetch(ctx, state, config) {
     if (disposed) return previous(input, init)
     try {
       const request = normalizeRequest(input, init)
-      if (!request || !matchesGateway(request, config)) return previous(input, init)
+      if (!request) return previous(input, init)
       if (!state.enabled(config)) return previous(input, init)
-      let bodyObject
-      try {
-        bodyObject = JSON.parse(request.body)
-      } catch {
-        return previous(input, init)
+
+      if (matchesGateway(request, config)) {
+        let bodyObject
+        try {
+          bodyObject = JSON.parse(request.body)
+        } catch {
+          return previous(input, init)
+        }
+        if (!bodyObject || typeof bodyObject !== 'object') return previous(input, init)
+        diagnostics.intercepted += 1
+        diagnostics.lastInterceptAt = Date.now()
+        return await proxyRequest(previous, request, bodyObject, state, config, ctx)
       }
-      if (!bodyObject || typeof bodyObject !== 'object') return previous(input, init)
-      diagnostics.intercepted += 1
-      diagnostics.lastInterceptAt = Date.now()
-      return await proxyRequest(previous, request, bodyObject, state, config, ctx)
+
+      // Other providers: record the call for the request log, never rewrite it.
+      if (isLlmRequest(request)) {
+        diagnostics.intercepted += 1
+        diagnostics.lastInterceptAt = Date.now()
+        return await observeGeneric(previous, request, Date.now())
+      }
+
+      return previous(input, init)
     } catch (error) {
       diagnostics.lastInterceptError = String(error?.stack || error).slice(0, 500)
       log(ctx, config, `interceptor fallback: ${String(error?.message || error)}`)
@@ -964,6 +1237,7 @@ async function stateResponse(ctx, state, config) {
     models,
     summary: summarize(state.data.models),
     interceptor: diagnostics.interceptor,
+    logCount: logBook.entries.length,
     version: 1,
   }
 }
@@ -1083,6 +1357,33 @@ function registerRoutes(ctx, state, config) {
         return sendJSON(response, 200, await stateResponse(ctx, state, config))
       }
 
+      if (request.method === 'GET' && action === 'status') {
+        const cline = logBook.entries.find((entry) => entry.provider === 'cline') || null
+        return sendJSON(response, 200, {
+          ok: true,
+          enabled: state.enabled(config),
+          interceptor: diagnostics.interceptor,
+          last: cline || logBook.entries[0] || null,
+          total: logBook.entries.length,
+        })
+      }
+
+      if (request.method === 'GET' && action === 'logs') {
+        const query = Object.fromEntries(url.searchParams)
+        const entries = logBook.list(query)
+        return sendJSON(response, 200, {
+          ok: true,
+          total: logBook.entries.length,
+          entries,
+          providers: uniq(logBook.entries.map((entry) => entry.provider).filter(Boolean)),
+        })
+      }
+
+      if (request.method === 'POST' && action === 'logs/clear') {
+        logBook.clear()
+        return sendJSON(response, 200, { ok: true })
+      }
+
       if (request.method === 'GET' && action === 'diag') {
         return sendJSON(response, 200, {
           ok: true,
@@ -1191,5 +1492,7 @@ export function apply(ctx, rawConfig) {
     webCtx.effect(() => registerRoutes(webCtx, state, config))
   })
 }
+
+export const __test = { logBook, isLlmRequest, providerFromUrl, parseGenericSSE, extractUsage }
 
 export { normalizeConfig, Store, installFetch }

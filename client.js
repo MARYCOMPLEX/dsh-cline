@@ -118,6 +118,18 @@ window.__ModuleLoader__.load({
         resultNote: '请求已到达模型，但推理耗尽输出预算，内容为空；该渠道可用。',
         history: '请求历史',
         noHistory: '暂无请求记录。',
+        gatewayLog: '网关请求日志',
+        logAll: '全部提供商',
+        logCline: '仅 Cline',
+        logErrors: '仅失败',
+        logEmpty: '还没有请求记录。',
+        clearLog: '清空日志',
+        tokens: 'tokens',
+        upstreamCol: '实际上游',
+        providerCol: '提供商',
+        statusCol: '状态',
+        timeCol: '时间',
+        latencyCol: '耗时',
         loading: '加载中…',
         requestFailed: '请求失败',
         saved: '已保存',
@@ -213,6 +225,18 @@ window.__ModuleLoader__.load({
         resultNote: 'The request reached the model but reasoning consumed the output budget, so the content is empty; the channel is usable.',
         history: 'Request history',
         noHistory: 'No requests recorded yet.',
+        gatewayLog: 'Gateway request log',
+        logAll: 'All providers',
+        logCline: 'Cline only',
+        logErrors: 'Failures only',
+        logEmpty: 'No requests recorded yet.',
+        clearLog: 'Clear log',
+        tokens: 'tokens',
+        upstreamCol: 'Upstream',
+        providerCol: 'Provider',
+        statusCol: 'Status',
+        timeCol: 'Time',
+        latencyCol: 'Latency',
         loading: 'Loading…',
         requestFailed: 'Request failed',
         saved: 'Saved',
@@ -308,6 +332,13 @@ window.__ModuleLoader__.load({
 .dc-empty{padding:20px 4px;color:var(--dc-text-3);font-size:12.5px;text-align:center}
 .dc-history{margin-top:16px}
 .dc-history summary{cursor:pointer;color:var(--dc-text-2);font-size:12.5px;user-select:none}
+.dc-log-tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 0 8px}
+.dc-logs{border:1px solid var(--dc-border);border-radius:10px;overflow:hidden;background:var(--dc-bg)}
+.dc-log-row{display:grid;grid-template-columns:64px 78px minmax(120px,1.2fr) minmax(90px,.8fr) 56px 58px 84px;gap:8px;align-items:center;padding:6px 10px;border-top:1px solid var(--dc-border);font-size:11.5px;color:var(--dc-text-2)}
+.dc-log-row:first-child{border-top:0}
+.dc-log-head{background:var(--dc-surface);color:var(--dc-text-3);font-size:11px}
+.dc-log-row .dc-code{font-size:11.5px}
+.dc-log-provider{display:inline-flex;align-items:center;gap:5px}
 .dc-history summary:focus-visible{outline:2px solid var(--dc-link);outline-offset:2px}
 .dc-history-row{display:grid;grid-template-columns:110px minmax(120px,1fr) 64px 70px;gap:10px;padding:6px 0;border-top:1px solid var(--dc-border);font-size:12px;align-items:center}
 .dc-history-row:first-of-type{margin-top:8px}
@@ -503,6 +534,55 @@ window.__ModuleLoader__.load({
       )
     }
 
+    function UpstreamPill() {
+      const [status, setStatus] = React.useState(null)
+      React.useEffect(() => {
+        let alive = true
+        let timer = null
+        const tick = async () => {
+          try {
+            const response = await fetch(apiURL('/status'), { headers: { accept: 'application/json' } })
+            const json = await response.json()
+            if (alive) setStatus(json)
+          } catch {
+            // The Host may be starting; retry on the next tick.
+          }
+          if (alive) timer = setTimeout(tick, 5000)
+        }
+        tick()
+        return () => {
+          alive = false
+          if (timer) clearTimeout(timer)
+        }
+      }, [])
+      if (!status || status.enabled === false || !status.last) return null
+      const entry = status.last
+      const label = entry.upstream || entry.provider || '—'
+      const mismatch = entry.target && entry.upstream && entry.target !== entry.upstream
+      const color = entry.error
+        ? 'var(--dsw-alias-state-error-primary, #d92d20)'
+        : mismatch
+          ? 'var(--dsw-alias-state-warn-primary, #b54708)'
+          : 'var(--dsw-alias-state-success-primary, #22c55e)'
+      const zh = langFromStorage() === 'zh'
+      return h('span', {
+        title: `${entry.model || ''} · ${entry.provider || ''}${entry.upstream ? ` · ${entry.upstream}` : ''} · ${entry.ms || 0} ms`,
+        style: {
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 5,
+          padding: '0 8px',
+          height: 20,
+          fontSize: 11.5,
+          lineHeight: '20px',
+          color: 'var(--dsw-alias-label-tertiary, #81858c)',
+          whiteSpace: 'nowrap',
+        },
+      },
+      h('span', { style: { width: 6, height: 6, borderRadius: '50%', background: color, flex: 'none' } }),
+      `${zh ? '上游' : 'upstream'} ${label}`)
+    }
+
     function Panel(props) {
       const [lang, setLang] = React.useState(langFromStorage)
       const [data, setData] = React.useState(props && props.initialData ? props.initialData : null)
@@ -511,6 +591,10 @@ window.__ModuleLoader__.load({
       const [notice, setNotice] = React.useState(null)
       const [result, setResult] = React.useState(null)
       const [error, setError] = React.useState(null)
+      const [logs, setLogs] = React.useState([])
+      const [logTotal, setLogTotal] = React.useState(0)
+      const [logOpen, setLogOpen] = React.useState(false)
+      const [logFilter, setLogFilter] = React.useState('all')
       const busyRef = React.useRef(null)
       const t = TEXT[lang]
 
@@ -527,6 +611,34 @@ window.__ModuleLoader__.load({
           return null
         }
       }, [])
+
+      React.useEffect(() => {
+        if (!logOpen) return undefined
+        let alive = true
+        let timer = null
+        const load = async () => {
+          try {
+            const query = logFilter === 'cline'
+              ? '?onlyCline=1&limit=80'
+              : logFilter === 'errors'
+                ? '?onlyErrors=1&limit=80'
+                : '?limit=80'
+            const json = await api('/logs' + query)
+            if (alive) {
+              setLogs(json.entries || [])
+              setLogTotal(json.total || 0)
+            }
+          } catch {
+            // Keep the previous page; the next tick retries.
+          }
+          if (alive) timer = setTimeout(load, 4000)
+        }
+        load()
+        return () => {
+          alive = false
+          if (timer) clearTimeout(timer)
+        }
+      }, [logOpen, logFilter])
 
       React.useEffect(() => {
         let alive = true
@@ -682,6 +794,17 @@ window.__ModuleLoader__.load({
       const setSort = (value) => {
         if (!current) return
         save({ sort: value || null }, `${t.saved}: ${t.sort}`)
+      }
+
+      const clearLogs = async () => {
+        try {
+          await api('/logs/clear', {})
+          setLogs([])
+          setLogTotal(0)
+          setNotice({ tone: 'ok', text: t.clearLog })
+        } catch (failure) {
+          setNotice({ tone: 'bad', text: `${t.requestFailed}: ${String(failure && failure.message ? failure.message : failure)}` })
+        }
       }
 
       const toggleEnabled = () => run('enabled', () => api('/enabled', { enabled: !(data && data.enabled) }),
@@ -892,6 +1015,74 @@ window.__ModuleLoader__.load({
                   ))
                   : h('div', { className: 'dc-empty' }, t.noHistory),
               ),
+
+              h('details', {
+                className: 'dc-history',
+                open: logOpen,
+                onToggle: (event) => setLogOpen(event.currentTarget.open),
+              },
+              h('summary', null, `${t.gatewayLog} (${logOpen ? logTotal : ((data && data.logCount) || logTotal)})`),
+              logOpen ? h(React.Fragment, null,
+                h('div', { className: 'dc-log-tools' },
+                  h('select', {
+                    className: 'dc-select',
+                    style: { height: 28, minWidth: 140, fontSize: 12 },
+                    value: logFilter,
+                    onChange: (event) => setLogFilter(event.target.value),
+                    'aria-label': t.gatewayLog,
+                  },
+                  h('option', { value: 'all' }, t.logAll),
+                  h('option', { value: 'cline' }, t.logCline),
+                  h('option', { value: 'errors' }, t.logErrors)),
+                  h('span', { className: 'dc-spacer' }),
+                  h('button', { type: 'button', className: 'dc-btn dc-btn-sm dc-btn-ghost', onClick: clearLogs }, t.clearLog),
+                ),
+                logs.length
+                  ? h('div', { className: 'dc-logs' },
+                    h('div', { className: 'dc-log-row dc-log-head' },
+                      h('span', null, t.timeCol),
+                      h('span', null, t.providerCol),
+                      h('span', null, t.model),
+                      h('span', null, t.upstreamCol),
+                      h('span', null, t.statusCol),
+                      h('span', null, t.latencyCol),
+                      h('span', null, t.tokens),
+                    ),
+                    logs.map((entry) => {
+                      const bad = !!entry.error || !entry.status || Number(entry.status) >= 400
+                      const mismatch = entry.target && entry.upstream && entry.target !== entry.upstream
+                      return h('div', {
+                        key: entry.id,
+                        className: 'dc-log-row',
+                        title: [
+                          entry.endpoint ? `${entry.endpoint}` : '',
+                          entry.error ? `${t.error}: ${entry.error}` : '',
+                          entry.target ? `${t.target}: ${entry.target}` : '',
+                          Array.isArray(entry.attempts) && entry.attempts.length ? `${t.attempts}: ${entry.attempts.join(' → ')}` : '',
+                          entry.requestId ? `id: ${entry.requestId}` : '',
+                        ].filter(Boolean).join('\n'),
+                      },
+                      h('span', { className: 'dc-meta' }, fmtTime(entry.at)),
+                      h('span', { className: 'dc-log-provider' },
+                        h('span', { className: 'dc-dot', style: { background: entry.provider === 'cline' ? 'var(--dc-link)' : 'var(--dc-text-3)' } }),
+                        entry.provider || '—'),
+                      h('span', { className: 'dc-code dc-truncate', title: entry.model || '' }, entry.model || entry.requestedModel || '—'),
+                      h('span', {
+                        className: 'dc-code dc-truncate',
+                        style: mismatch ? { color: 'var(--dc-warn)' } : undefined,
+                        title: entry.upstream || '',
+                      }, entry.upstream || '—'),
+                      h('span', { className: 'dc-meta', style: bad ? { color: 'var(--dc-error)' } : undefined }, entry.status ? String(entry.status) : 'ERR'),
+                      h('span', { className: 'dc-meta' }, entry.ms ? `${entry.ms} ${t.ms}` : '—'),
+                      h('span', { className: 'dc-meta' }, entry.usage
+                        ? `${entry.usage.prompt || 0}/${entry.usage.completion || 0}`
+                        : '—'),
+                      )
+                    }),
+                  )
+                  : h('div', { className: 'dc-empty' }, t.logEmpty),
+              ) : null,
+              ),
             ),
 
         h('div', { className: 'dc-footer' },
@@ -930,6 +1121,12 @@ window.__ModuleLoader__.load({
           id: 'dsh-cline',
           order: 20,
         }, (slotProps) => h(Boundary, null, h(Panel, slotProps || {}))))
+
+        ctx.slots.inject('conversation.composer.dock', () => ctx.slots.register({
+          name: 'conversation.composer.dock',
+          id: 'dsh-cline-upstream',
+          order: 2,
+        }, UpstreamPill))
       },
     }
   },
