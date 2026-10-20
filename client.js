@@ -605,6 +605,24 @@ window.__ModuleLoader__.load({
     const upstreamMemory = new Map()
     const UPSTREAM_STORE = 'dsh-cline.upstream.'
 
+    // One throttled line per client decision, readable from /dsh-cline/diag.
+    // Without it a missing pill is indistinguishable from a missing request.
+    let lastReportAt = 0
+    function reportClient(payload) {
+      const now = Date.now()
+      if (now - lastReportAt < 8000) return
+      lastReportAt = now
+      try {
+        fetch(apiURL('/client-log'), {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(payload),
+        }).catch(() => {})
+      } catch {
+        // Diagnostics are best-effort.
+      }
+    }
+
     function readStored(sessionId) {
       if (!sessionId) return null
       const cached = upstreamMemory.get(sessionId)
@@ -634,21 +652,21 @@ window.__ModuleLoader__.load({
 
     function UpstreamPill(props) {
       const sessionId = props && typeof props.sessionId === 'string' ? props.sessionId : null
-      const mountedAt = React.useRef(Date.now())
       const [entry, setEntry] = React.useState(() => readStored(sessionId))
       const [enabled, setEnabled] = React.useState(true)
 
       // A conversation switch must clear the reading immediately, before the
       // next poll can arrive; otherwise the previous channel lingers.
       React.useEffect(() => {
-        mountedAt.current = Date.now()
         setEntry(readStored(sessionId))
+        reportClient({ event: 'mount', sessionId, props: Object.keys(props || {}) })
       }, [sessionId])
 
       React.useEffect(() => {
         let alive = true
         let timer = null
         const tick = async () => {
+          let report = { event: 'poll', sessionId }
           try {
             const query = sessionId ? `?session=${encodeURIComponent(sessionId)}` : ''
             const response = await fetch(apiURL(`/status${query}`), { headers: { accept: 'application/json' } })
@@ -656,16 +674,28 @@ window.__ModuleLoader__.load({
             if (!alive) return
             setEnabled(json.enabled !== false)
             const candidate = json.last || null
-            // A Host-attributed entry belongs to exactly one session; an
-            // unattributed one is only adopted when it arrived while this
-            // conversation was on screen.
-            const owned = candidate
-              && (candidate.session ? candidate.session === sessionId : candidate.at >= mountedAt.current)
+            // An entry explicitly attributed elsewhere belongs to another
+            // conversation; one without attribution is the newest request the
+            // Host saw and is still worth showing, since a Cline call cannot
+            // carry a session id on the wire.
+            const owned = !!candidate && (!candidate.session || candidate.session === sessionId)
+            report = {
+              event: 'poll',
+              sessionId,
+              hasLast: !!candidate,
+              candidateProvider: candidate && candidate.provider,
+              candidateSession: candidate && candidate.session,
+              candidateAt: candidate && candidate.at,
+              owned,
+              source: candidate && candidate.source,
+            }
             if (!owned) return
             storeReading(sessionId, candidate)
             setEntry(candidate)
-          } catch {
-            // The Host may be starting; retry on the next tick.
+          } catch (error) {
+            report = { event: 'poll-failed', sessionId, error: String(error && error.message ? error.message : error) }
+          } finally {
+            reportClient(report)
           }
           if (alive) timer = setTimeout(tick, 5000)
         }

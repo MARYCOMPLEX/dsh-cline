@@ -30,7 +30,7 @@ import {
 } from './core.js'
 
 const PKG = 'dsh-cline'
-const VERSION = '1.4.3'
+const VERSION = '1.4.4'
 const API_PREFIX = '/dsh-cline'
 const OR_API = 'https://openrouter.ai/api/v1'
 
@@ -42,6 +42,7 @@ const diagnostics = {
   lastInterceptAt: null,
   lastInterceptError: null,
   lastRouteAt: null,
+  clientLogs: [],
 }
 
 // The bearer token observed on gateway traffic, kept in memory only.
@@ -1404,6 +1405,17 @@ function registerRoutes(ctx, state, config) {
         })
       }
 
+      if (request.method === 'POST' && action === 'client-log') {
+        try {
+          const body = await parseJSONBody(request)
+          diagnostics.clientLogs.unshift({ at: Date.now(), ...body })
+          if (diagnostics.clientLogs.length > 20) diagnostics.clientLogs.length = 20
+        } catch {
+          // A malformed diagnostic must never affect the panel.
+        }
+        return sendJSON(response, 200, { ok: true })
+      }
+
       if (request.method === 'GET' && action === 'logs') {
         const query = Object.fromEntries(url.searchParams)
         const entries = logBook.list(query)
@@ -1430,6 +1442,7 @@ function registerRoutes(ctx, state, config) {
           lastInterceptAt: diagnostics.lastInterceptAt,
           lastInterceptError: diagnostics.lastInterceptError,
           lastRouteAt: diagnostics.lastRouteAt,
+          clientLogs: diagnostics.clientLogs,
           stateFile: state.file,
           process: { pid: process.pid, platform: process.platform, node: process.version },
           config: {
