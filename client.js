@@ -1239,6 +1239,8 @@ window.__ModuleLoader__.load({
 
     return {
       inject: ['slots'],
+      // Rendering harness for the SSR checks; the Host ignores unknown fields.
+      __test: { UpstreamPill, Panel },
       apply(ctx) {
         ctx.slots.inject('settings.models.footer', () => ctx.slots.register({
           name: 'settings.models.footer',
