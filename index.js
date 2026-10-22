@@ -30,7 +30,7 @@ import {
 } from './core.js'
 
 const PKG = 'dsh-cline'
-const VERSION = '1.4.4'
+const VERSION = '1.4.5'
 const API_PREFIX = '/dsh-cline'
 const OR_API = 'https://openrouter.ai/api/v1'
 

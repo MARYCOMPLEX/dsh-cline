@@ -1,9 +1,28 @@
 {
   "name": "dsh-cline",
-  "version": "1.4.4",
-  "private": true,
+  "version": "1.4.5",
   "type": "module",
   "description": "Cline Pass upstream discovery, pinning, validation, and failover for DeepSeek Harness",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "cline",
+    "cline-pass",
+    "upstream",
+    "llm"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MARYCOMPLEX/dsh-cline.git"
+  },
+  "homepage": "https://github.com/MARYCOMPLEX/dsh-cline#readme",
+  "bugs": {
+    "url": "https://github.com/MARYCOMPLEX/dsh-cline/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",

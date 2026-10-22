@@ -41,7 +41,26 @@ Cline Pass 的订阅模型（`cline-pass/*`）在 Cline 网关之后分成两条
 
 ---
 
-## 安装（从 GitHub 安装）
+## 安装
+
+### 在 DSH 界面里输入包名（npm 安装）
+
+插件发布到 npm 后，别人不需要克隆仓库，也不需要记 Git 地址：
+
+1. 打开 **设置 → 插件 → 安装第三方插件**；
+2. 在输入框里填入 `dsh-cline`（或发布时用的 scope 名），点安装；
+3. 重启 DeepSeek Harness。
+
+命令行等价形式：
+
+```powershell
+dsh plugin --profile desktop add dsh-cline
+```
+
+> 安装源选「npm 官方源」最快；npmmirror 等镜像同步新包有延迟。
+> 这一步的前提是包已经 `npm publish`（见文末「发布」）。
+
+### 从 GitHub 安装
 
 ```powershell
 dsh plugin --profile desktop add github:MARYCOMPLEX/dsh-cline
@@ -53,7 +72,7 @@ dsh plugin --profile desktop add github:MARYCOMPLEX/dsh-cline
 也可以锁定版本或分支：
 
 ```powershell
-dsh plugin --profile desktop add github:MARYCOMPLEX/dsh-cline#v1.4.3
+dsh plugin --profile desktop add github:MARYCOMPLEX/dsh-cline#v1.4.5
 ```
 
 更新到最新：
@@ -68,7 +87,19 @@ dsh plugin --profile desktop update dsh-cline
 dsh plugin --profile desktop remove dsh-cline
 ```
 
-> 本地开发时也可以 `add C:\path\to\dsh-cline` 以目录链接方式安装；发布使用上面的 GitHub 形式。
+> 本地开发时也可以 `add C:\path\to\dsh-cline` 以目录链接方式安装。
+
+### 发布到 npm（维护者）
+
+```powershell
+# npm 配置里若是 npmmirror，必须先切到官方源；镜像是只读的
+npm login --registry=https://registry.npmjs.org/
+npm publish --registry=https://registry.npmjs.org/
+```
+
+包内已配置 `files` 白名单，发布产物只包含 `index.js / core.js / client.js /
+cordis.patch.yml / locale / icon.svg / README / LICENSE`，不含 `test` 与 `tools`。
+若 `dsh-cline` 名称不可用，可改成 `@<scope>/dsh-cline` 发布，安装时输入完整 scope 名。
 
 ---
 
