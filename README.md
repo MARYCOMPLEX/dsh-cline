@@ -72,7 +72,7 @@ dsh plugin --profile desktop add github:MARYCOMPLEX/dsh-cline
 也可以锁定版本或分支：
 
 ```powershell
-dsh plugin --profile desktop add github:MARYCOMPLEX/dsh-cline#v1.5.0
+dsh plugin --profile desktop add github:MARYCOMPLEX/dsh-cline#v1.6.0
 ```
 
 更新到最新：
@@ -114,11 +114,13 @@ cordis.patch.yml / locale / icon.svg / README / LICENSE`，不含 `test` 与 `to
    - **优先 + 回退**：`order: [当前, 其余]`，第一个不可用时网关顺切。
 5. **排序**：最低成本 / 最快首字 / 最高吞吐（direct 自动翻译成 `price / latency / throughput`）。
 6. **排除**：被排除的渠道永不被使用，插件把「已知渠道 − 排除项」换算成 `only` 白名单（网关会静默忽略 `exclude` 字段）。
-7. **能力过滤（has）**：面板上的六个能力胶囊（视觉 / 推理 / 工具调用 / 结构化输出 / 隐式缓存 / 免费），
-   也接受手写量化条件（`quantization:fp8`、`!quantization:bf16`）。注入成
-   `providerOptions.gateway.has`，与 `only` / `order` **取交集**：钉住"deepseek"再要求"免费"，
-   网关会直接 400 `None of the providers considered ... satisfy the required has conditions`，
-   不会悄悄换渠道。插件对这种错误**不重试下一个钉住项**（结果必然相同），直接把错误返回。
+7. **能力过滤（has）**：先勾「has 能力过滤」总开关，下面才出现参数复选框（视觉 / 推理 / 工具调用 / 结构化输出 /
+   隐式缓存 / 免费）；手写量化条件（`quantization:fp8`、`!quantization:bf16`）点「添加」后也变成一个可勾选项。
+   改完会实时预览这条请求**将要携带**的路由字段（Host 用拦截器同一段代码算出，不会出现"预览与实发不一致"），
+   点「保存」才写入，「取消」丢弃草稿。
+   注入的是 `providerOptions.gateway.has`，与 `only` / `order` **取交集**：钉住 deepseek 再要求"免费"，
+   网关直接返回 400 `None of the providers considered ... satisfy the required has conditions`，
+   插件对这种错误**不重试下一个钉住项**（结果必然相同），直接把错误返回。
 8. **测试钉住**：按当前配置真实跑一次，显示目标 vs 实际以及尝试序列。
 
 聊天时插件自动记录：管道、实际渠道、规范模型、耗时、尝试序列（最近 50 条）。面板每 4 秒刷新一次，页面隐藏时暂停。
@@ -220,6 +222,7 @@ config:
 | POST | `/dsh-cline/probe` | `{model}` → 管道 + 渠道清单 |
 | POST | `/dsh-cline/validate` | `{model}` → 全渠道可用性 |
 | POST | `/dsh-cline/test` | `{model}` → 目标 vs 实际 + 尝试序列 |
+| POST | `/dsh-cline/preview` | `{model, has?, upstreams?, pinMode?, sort?}` → 预览将注入的 `providerOptions` / `provider` |
 | POST | `/dsh-cline/enabled` | `{enabled}` |
 
 桌面版页面以 `file://` 加载，插件按 `globalThis.__DSH_TRANSPORT__.streamBaseUrl` 解析 Host 源；

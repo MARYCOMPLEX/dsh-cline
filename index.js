@@ -30,7 +30,7 @@ import {
 } from './core.js'
 
 const PKG = 'dsh-cline'
-const VERSION = '1.5.0'
+const VERSION = '1.6.0'
 const API_PREFIX = '/dsh-cline'
 const OR_API = 'https://openrouter.ai/api/v1'
 
@@ -1485,6 +1485,33 @@ function registerRoutes(ctx, state, config) {
         state.data.enabled = body.enabled !== false
         state.save()
         return sendJSON(response, 200, { ok: true, enabled: state.enabled(config) })
+      }
+
+      if (request.method === 'POST' && action === 'preview') {
+        const body = await parseJSONBody(request)
+        if (typeof body.model !== 'string' || !body.model) {
+          return sendJSON(response, 400, { ok: false, error: 'model is required' })
+        }
+        const meta = state.model(body.model)
+        const cfg = normalizeModelConfig({
+          upstreams: body.upstreams ?? meta.cfg.upstreams,
+          exclude: body.exclude ?? meta.cfg.exclude,
+          has: body.has ?? meta.cfg.has,
+          pinMode: body.pinMode ?? meta.cfg.pinMode,
+          sort: body.sort ?? meta.cfg.sort,
+        })
+        // The exact fields the interceptor would add, computed with the same
+        // code path so the panel never shows a preview it would not send.
+        const base = { model: body.model, messages: [{ role: 'user', content: '...' }] }
+        const attempts = buildAttempts(cfg).map((attempt) => {
+          const sent = injectPrefs(base, meta.pipeline, attempt, meta.upstreams || [])
+          return {
+            upstream: attempt.upstream,
+            providerOptions: sent.providerOptions ?? null,
+            provider: sent.provider ?? null,
+          }
+        })
+        return sendJSON(response, 200, { ok: true, pipeline: meta.pipeline, cfg, attempts })
       }
 
       if (request.method === 'POST' && action === 'config') {

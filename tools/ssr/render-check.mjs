@@ -120,9 +120,10 @@ const checks = {
   lastActual: html.includes('最近实际'),
   tokenOnly: html.includes('--dsw-alias-label-primary') && !html.includes('#171a21'),
   summary: html.includes('dc-stat'),
-  hasChips: html.includes('dc-has-chip'),
-  hasActive: html.includes('dc-has-chip is-on'),
+  hasChips: html.includes('dc-has-opt'),
+  hasActive: html.includes('dc-has-master') && html.includes('checked=""'),
   hasInput: html.includes('dc-has-input'),
+  hasPreview: html.includes('dc-has-json'),
   hasLabel: html.includes('视觉'),
 }
 console.log(JSON.stringify(checks, null, 2))

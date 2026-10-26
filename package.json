@@ -1,6 +1,6 @@
 {
   "name": "dsh-cline",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "type": "module",
   "description": "Cline Pass upstream discovery, pinning, validation, and failover for DeepSeek Harness",
   "keywords": [

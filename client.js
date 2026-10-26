@@ -140,6 +140,14 @@ window.__ModuleLoader__.load({
         hasCustomPlaceholder: 'quantization:fp8 或 !quantization:bf16',
         hasAdd: '添加',
         hasClear: '清除',
+        hasSubtitle: '勾选后只让满足这些能力的渠道可路由；与钉住取交集',
+        hasPreview: '请求将携带',
+        hasPreviewEmpty: '（当前配置不注入任何路由字段）',
+        hasPreviewAttempts: '次尝试，仅预览第一条',
+        hasUnsaved: '有未保存的修改',
+        hasSavedHint: '已与保存的配置一致',
+        confirm: '保存',
+        cancel: '取消',
         pinnedOrder: '钉住顺序',
         noPinned: '当前为自动模式，未钉住任何渠道。',
         noChannelPinned: '已选择该模式，但还没有钉住渠道；点下方渠道行的「钉住」。',
@@ -253,6 +261,14 @@ window.__ModuleLoader__.load({
         hasCustomPlaceholder: 'quantization:fp8 or !quantization:bf16',
         hasAdd: 'Add',
         hasClear: 'Clear',
+        hasSubtitle: 'Route only to channels with these capabilities; intersected with the pin',
+        hasPreview: 'The request will carry',
+        hasPreviewEmpty: '(this config injects no routing fields)',
+        hasPreviewAttempts: 'attempts, showing the first',
+        hasUnsaved: 'Unsaved changes',
+        hasSavedHint: 'Matches the saved config',
+        confirm: 'Save',
+        cancel: 'Cancel',
         pinnedOrder: 'Pinned order',
         noPinned: 'Automatic mode: no channel is pinned.',
         noChannelPinned: 'The mode is selected but no channel is pinned yet; press Pin on a channel below.',
@@ -371,15 +387,21 @@ window.__ModuleLoader__.load({
 .dc-section-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}
 .dc-section-title{font-size:14px;font-weight:600}
 .dc-hint{color:var(--dc-text-3);font-size:12px}
-.dc-has{display:flex;flex-direction:column;gap:6px;margin:2px 0 10px}
-.dc-has-chipset{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
-.dc-has-chip{height:26px;padding:0 10px;border:1px solid var(--dc-border);border-radius:999px;background:var(--dc-surface);color:var(--dc-text-2);font:inherit;font-size:12px;cursor:pointer}
-.dc-has-chip:hover:not(:disabled){color:var(--dc-text);background:var(--dc-hover)}
-.dc-has-chip.is-on{border-color:var(--dc-link);background:var(--dc-active);color:var(--dc-text);font-weight:600}
-.dc-has-chip:disabled{opacity:.55;cursor:default}
-.dc-has-chip.is-custom{font-family:Consolas,"Cascadia Mono",monospace;font-size:11.5px}
-.dc-has-input{height:26px;min-width:210px;padding:0 8px;border:1px solid var(--dc-border);border-radius:7px;background:var(--dc-bg);color:var(--dc-text);font:inherit;font-size:12px}
+.dc-has{display:flex;flex-direction:column;gap:8px;margin:2px 0 12px}
+.dc-has-master{display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;color:var(--dc-text)}
+.dc-has-master input,.dc-has-opt input{width:15px;height:15px;margin:0;accent-color:var(--dc-fill);cursor:pointer}
+.dc-has-master-label{font-weight:600}
+.dc-has-body{display:flex;flex-direction:column;gap:8px;padding:12px;border:1px solid var(--dc-border);border-radius:10px;background:var(--dc-surface)}
+.dc-has-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:6px 12px}
+.dc-has-opt{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--dc-text-2);cursor:pointer}
+.dc-has-opt.is-custom{font-family:Consolas,"Cascadia Mono",monospace;font-size:11.5px}
+.dc-has-custom{display:flex;gap:8px;align-items:center}
+.dc-has-input{height:28px;flex:1 1 auto;min-width:180px;padding:0 8px;border:1px solid var(--dc-border);border-radius:7px;background:var(--dc-bg);color:var(--dc-text);font:inherit;font-size:12px}
 .dc-has-input:focus-visible{outline:2px solid var(--dc-link);outline-offset:1px}
+.dc-has-preview{display:flex;flex-direction:column;gap:4px}
+.dc-has-preview-head{font-size:11.5px;color:var(--dc-text-3)}
+.dc-has-json{margin:0;padding:10px 12px;border-radius:8px;background:var(--dc-bg);border:1px solid var(--dc-border);color:var(--dc-text-2);font-family:Consolas,"Cascadia Mono",monospace;font-size:11.5px;line-height:1.5;overflow-x:auto;white-space:pre}
+.dc-has-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .dc-spacer{flex:1 1 auto}
 .dc-seg{display:inline-flex;gap:2px;padding:2px;border:1px solid var(--dc-border);border-radius:9px;background:var(--dc-surface)}
 .dc-seg button{height:26px;padding:0 11px;border:0;border-radius:7px;background:transparent;color:var(--dc-text-2);font:inherit;font-size:12px;cursor:pointer}
@@ -782,7 +804,16 @@ window.__ModuleLoader__.load({
       const [logTotal, setLogTotal] = React.useState(0)
       const [logOpen, setLogOpen] = React.useState(false)
       const [logFilter, setLogFilter] = React.useState('all')
-      const [hasDraft, setHasDraft] = React.useState('')
+      // Seeded from the slot props so the first paint already shows the saved
+      // filter (server rendering has no effects to fall back on).
+      const [hasEdit, setHasEdit] = React.useState(() => {
+        const seedModel = props && props.initialModel && props.initialData && Array.isArray(props.initialData.models)
+          ? props.initialData.models.find((model) => model.id === props.initialModel)
+          : null
+        const seedHas = seedModel && seedModel.cfg && Array.isArray(seedModel.cfg.has) ? seedModel.cfg.has : []
+        return { enabled: seedHas.length > 0, values: [...seedHas], custom: '' }
+      })
+      const [preview, setPreview] = React.useState(null)
       const busyRef = React.useRef(null)
       const t = TEXT[lang]
 
@@ -984,33 +1015,40 @@ window.__ModuleLoader__.load({
         save({ sort: value || null }, `${t.saved}: ${t.sort}`)
       }
 
-      const toggleHas = (value) => {
-        if (!current) return
-        const list = current.cfg.has.includes(value)
-          ? current.cfg.has.filter((item) => item !== value)
-          : [...current.cfg.has, value]
-        save({ has: list }, `${t.saved}: ${t.hasTitle}`)
+      // The capability filter is edited as a draft: nothing is persisted until
+      // the explicit save, and the preview shows exactly what would be sent.
+      const toggleHasValue = (value) => {
+        setHasEdit((prev) => ({
+          ...prev,
+          values: prev.values.includes(value)
+            ? prev.values.filter((item) => item !== value)
+            : [...prev.values, value],
+        }))
       }
 
       const addHasCustom = () => {
-        if (!current) return
-        const text = String(hasDraft || '').trim().toLowerCase()
+        const text = String(hasEdit.custom || '').trim().toLowerCase()
         if (!text) return
         if (!/^!?quantization:[a-z0-9._-]{1,24}$/.test(text) && !HAS_OPTION_VALUES.includes(text)) {
           setNotice({ tone: 'bad', text: `${t.hasTitle}: ${t.hasCustomPlaceholder}` })
           return
         }
-        if (current.cfg.has.includes(text)) {
-          setHasDraft('')
-          return
-        }
-        save({ has: [...current.cfg.has, text] }, `${t.saved}: ${text}`)
-        setHasDraft('')
+        setHasEdit((prev) => ({
+          custom: '',
+          enabled: true,
+          values: prev.values.includes(text) ? prev.values : [...prev.values, text],
+        }))
       }
 
-      const clearHas = () => {
-        if (!current || current.cfg.has.length === 0) return
-        save({ has: [] }, `${t.saved}: ${t.hasTitle}`)
+      const saveHas = () => {
+        if (!current) return
+        const values = hasEdit.enabled ? hasEdit.values : []
+        save({ has: values }, `${t.saved}: ${t.hasTitle}`)
+      }
+
+      const resetHasDraft = () => {
+        const saved = current ? current.cfg.has : []
+        setHasEdit({ enabled: saved.length > 0, values: [...saved], custom: '' })
       }
 
       const clearLogs = async () => {
@@ -1050,6 +1088,30 @@ window.__ModuleLoader__.load({
         : cfg.pinMode === 'preferred'
           ? t.modePreferredHint
           : t.modeStrictHint
+
+      const savedHas = cfg.has.join(',')
+      // Re-seed the draft whenever the model or its saved filter changes.
+      React.useEffect(() => {
+        setHasEdit({ enabled: cfg.has.length > 0, values: [...cfg.has], custom: '' })
+      }, [selectedId, savedHas])
+
+      // Preview: the Host computes it with the same code path the interceptor
+      // uses, so what the panel shows is exactly what the request will carry.
+      React.useEffect(() => {
+        let alive = true
+        api('/preview', { model: selectedId, has: hasEdit.enabled ? hasEdit.values : [] })
+          .then((json) => { if (alive) setPreview(json) })
+          .catch(() => { if (alive) setPreview(null) })
+        return () => { alive = false }
+      }, [selectedId, hasEdit.enabled, hasEdit.values.join(','), cfg.upstreams.join(','), cfg.pinMode, cfg.sort])
+
+      const previewAttempts = preview && Array.isArray(preview.attempts) ? preview.attempts : []
+      const previewFirst = previewAttempts.length
+        ? (previewAttempts[0].providerOptions || previewAttempts[0].provider || null)
+        : null
+      const previewText = previewFirst ? JSON.stringify(previewFirst, null, 2) : t.hasPreviewEmpty
+      const draftHas = hasEdit.enabled ? hasEdit.values : []
+      const hasDirty = JSON.stringify(draftHas) !== JSON.stringify(cfg.has)
 
       const resultOk = result && result.ok === true
       const resultTarget = result && Array.isArray(result.trace) && result.trace.length && result.trace[0].upstream
@@ -1193,51 +1255,71 @@ window.__ModuleLoader__.load({
                 ),
                 h('div', { className: 'dc-hint', style: { marginBottom: 10 } }, modeHint),
                 h('div', { className: 'dc-has' },
-                  h('div', { className: 'dc-has-chipset' },
-                    h('span', { className: 'dc-label' }, t.hasTitle),
-                    HAS_OPTIONS.map((option) => h('button', {
-                      key: option.value,
-                      type: 'button',
-                      className: `dc-has-chip${cfg.has.includes(option.value) ? ' is-on' : ''}`,
-                      'aria-pressed': cfg.has.includes(option.value),
-                      disabled: !!busy,
-                      title: option.value,
-                      onClick: () => toggleHas(option.value),
-                    }, lang === 'zh' ? option.zh : option.en)),
-                    cfg.has.filter((value) => !HAS_OPTION_VALUES.includes(value)).map((value) => h('button', {
-                      key: value,
-                      type: 'button',
-                      className: 'dc-has-chip is-on is-custom',
-                      'aria-pressed': true,
-                      disabled: !!busy,
-                      title: `${t.remove}: ${value}`,
-                      onClick: () => toggleHas(value),
-                    }, `${value} ×`)),
+                  h('label', { className: 'dc-has-master' },
                     h('input', {
-                      className: 'dc-has-input',
-                      value: hasDraft,
-                      placeholder: t.hasCustomPlaceholder,
+                      type: 'checkbox',
+                      checked: hasEdit.enabled,
                       disabled: !!busy,
-                      'aria-label': t.hasTitle,
-                      onChange: (event) => setHasDraft(event.target.value),
-                      onKeyDown: (event) => {
-                        if (event.key !== 'Enter') return
-                        event.preventDefault()
-                        addHasCustom()
-                      },
+                      onChange: (event) => setHasEdit((prev) => ({ ...prev, enabled: event.target.checked })),
                     }),
-                    h('button', {
-                      type: 'button', className: 'dc-btn dc-btn-sm',
-                      disabled: !!busy || !hasDraft.trim(), onClick: addHasCustom,
-                    }, t.hasAdd),
-                    cfg.has.length
-                      ? h('button', {
-                        type: 'button', className: 'dc-btn dc-btn-sm dc-btn-ghost',
-                        disabled: !!busy, onClick: clearHas,
-                      }, t.hasClear)
-                      : null,
-                  ),
-                  h('div', { className: 'dc-hint' }, cfg.has.length ? `${t.hasTitle}: ${cfg.has.join(' + ')} · ${t.hasHint}` : t.hasNone),
+                    h('span', { className: 'dc-has-master-label' }, t.hasTitle),
+                    h('span', { className: 'dc-hint' }, t.hasSubtitle)),
+                  hasEdit.enabled
+                    ? h('div', { className: 'dc-has-body' },
+                      h('div', { className: 'dc-has-grid' },
+                        HAS_OPTIONS.map((option) => h('label', { key: option.value, className: 'dc-has-opt', title: option.value },
+                          h('input', {
+                            type: 'checkbox',
+                            checked: hasEdit.values.includes(option.value),
+                            disabled: !!busy,
+                            onChange: () => toggleHasValue(option.value),
+                          }),
+                          h('span', null, lang === 'zh' ? option.zh : option.en))),
+                        hasEdit.values.filter((value) => !HAS_OPTION_VALUES.includes(value)).map((value) => h('label', {
+                          key: value, className: 'dc-has-opt is-custom', title: value,
+                        },
+                        h('input', {
+                          type: 'checkbox',
+                          checked: true,
+                          disabled: !!busy,
+                          onChange: () => toggleHasValue(value),
+                        }),
+                        h('span', null, value)))),
+                      h('div', { className: 'dc-has-custom' },
+                        h('input', {
+                          className: 'dc-has-input',
+                          value: hasEdit.custom,
+                          placeholder: t.hasCustomPlaceholder,
+                          disabled: !!busy,
+                          'aria-label': t.hasCustomPlaceholder,
+                          onChange: (event) => setHasEdit((prev) => ({ ...prev, custom: event.target.value })),
+                          onKeyDown: (event) => {
+                            if (event.key !== 'Enter') return
+                            event.preventDefault()
+                            addHasCustom()
+                          },
+                        }),
+                        h('button', {
+                          type: 'button', className: 'dc-btn dc-btn-sm',
+                          disabled: !!busy || !hasEdit.custom.trim(), onClick: addHasCustom,
+                        }, t.hasAdd)),
+                      h('div', { className: 'dc-has-preview' },
+                        h('div', { className: 'dc-has-preview-head' }, t.hasPreview),
+                        h('pre', { className: 'dc-has-json' }, previewText),
+                        previewAttempts.length > 1
+                          ? h('div', { className: 'dc-hint' }, `${previewAttempts.length} ${t.hasPreviewAttempts}`)
+                          : null),
+                      h('div', { className: 'dc-has-actions' },
+                        h('button', {
+                          type: 'button', className: 'dc-btn dc-btn-sm dc-btn-primary',
+                          disabled: !!busy || !hasDirty, onClick: saveHas,
+                        }, t.confirm),
+                        h('button', {
+                          type: 'button', className: 'dc-btn dc-btn-sm dc-btn-ghost',
+                          disabled: !!busy || !hasDirty, onClick: resetHasDraft,
+                        }, t.cancel),
+                        h('span', { className: 'dc-hint' }, hasDirty ? t.hasUnsaved : t.hasSavedHint)))
+                    : h('div', { className: 'dc-hint' }, t.hasNone),
                 ),
                 channels.length === 0
                   ? h('div', { className: 'dc-empty' }, t.noChannels)
