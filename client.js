@@ -142,6 +142,8 @@ window.__ModuleLoader__.load({
         hasClear: '清除',
         hasSubtitle: '勾选后只让满足这些能力的渠道可路由；与钉住取交集',
         hasPreview: '请求将携带',
+        hasDraftTag: '草稿，未保存',
+        pinIgnored: (target, actual) => `网关未遵守钉住：目标是 ${target}，实际是 ${actual}。这个模型的渠道池可能把请求路由到了 contributor 私有通道；加一个 has 能力条件通常能强制走公开池。`,
         hasPreviewEmpty: '（当前配置不注入任何路由字段）',
         hasPreviewAttempts: '次尝试，仅预览第一条',
         hasUnsaved: '有未保存的修改',
@@ -263,6 +265,8 @@ window.__ModuleLoader__.load({
         hasClear: 'Clear',
         hasSubtitle: 'Route only to channels with these capabilities; intersected with the pin',
         hasPreview: 'The request will carry',
+        hasDraftTag: 'draft, not saved',
+        pinIgnored: (target, actual) => `The gateway ignored the pin: target ${target}, actual ${actual}. This model's pool may be routing to the contributor private route; adding a has capability filter usually forces the public pool.`,
         hasPreviewEmpty: '(this config injects no routing fields)',
         hasPreviewAttempts: 'attempts, showing the first',
         hasUnsaved: 'Unsaved changes',
@@ -1208,6 +1212,14 @@ window.__ModuleLoader__.load({
                 last && last.error ? h('span', { className: 'dc-meta', style: { color: 'var(--dc-error)' } }, String(last.error).slice(0, 140)) : null,
               ),
 
+              // A strict pin the gateway did not honour is the failure mode that
+              // looks like success: call it out instead of leaving it to the
+              // log table.
+              lastProvider && cfg.pinMode !== 'auto' && cfg.upstreams.length && !cfg.upstreams.includes(lastProvider)
+                ? h('div', { className: 'dc-notice dc-notice-warn', style: { marginTop: 8 } },
+                  t.pinIgnored(cfg.upstreams[0], lastProvider))
+                : null,
+
               h('div', { className: 'dc-section' },
                 h('div', { className: 'dc-section-head' },
                   h('span', { className: 'dc-section-title' }, t.pinnedOrder),
@@ -1304,7 +1316,7 @@ window.__ModuleLoader__.load({
                           disabled: !!busy || !hasEdit.custom.trim(), onClick: addHasCustom,
                         }, t.hasAdd)),
                       h('div', { className: 'dc-has-preview' },
-                        h('div', { className: 'dc-has-preview-head' }, t.hasPreview),
+                        h('div', { className: 'dc-has-preview-head' }, hasDirty ? `${t.hasPreview} · ${t.hasDraftTag}` : t.hasPreview),
                         h('pre', { className: 'dc-has-json' }, previewText),
                         previewAttempts.length > 1
                           ? h('div', { className: 'dc-hint' }, `${previewAttempts.length} ${t.hasPreviewAttempts}`)
