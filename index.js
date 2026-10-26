@@ -30,7 +30,7 @@ import {
 } from './core.js'
 
 const PKG = 'dsh-cline'
-const VERSION = '1.4.5'
+const VERSION = '1.5.0'
 const API_PREFIX = '/dsh-cline'
 const OR_API = 'https://openrouter.ai/api/v1'
 
@@ -633,6 +633,11 @@ function tapResponse(response, modelId, state, config, started, trace, session =
     .catch(() => {})
 }
 
+/** Gateway refusal caused by an unsatisfiable or malformed `has` filter. */
+function isHasConflict(text) {
+  return /satisfy the required has conditions|has entries must be one of/i.test(String(text || ''))
+}
+
 function pushClineFailure(modelId, started, trace, status, error, session = null) {
   logBook.push({
     provider: 'cline',
@@ -888,6 +893,26 @@ async function proxyRequest(previous, request, bodyObject, state, config, ctx) {
     trace[trace.length - 1].note = text.slice(0, 160)
     if (attempt.upstream) learnStatus(state, modelId, attempt.upstream, text)
     if (!attempt.upstream && (attempt.excludeList || []).length) learnAvailable(state, modelId, text)
+
+    // A capability filter that matches nothing fails identically on every
+    // channel, so retrying the next pinned one would only add latency.
+    if (isHasConflict(text)) {
+      meta.errors = (meta.errors || 0) + 1
+      state.record(modelId, {
+        last: {
+          provider: null,
+          canonical: null,
+          at: Date.now(),
+          ms: Date.now() - started,
+          status: response.status,
+          attempts: trace.map((item) => item.upstream || 'auto'),
+          target: attempt.upstream || null,
+          error: text.slice(0, 300),
+        },
+      })
+      pushClineFailure(modelId, started, trace, response.status, text, session)
+      return rebuildResponse(text, response)
+    }
 
     if (index === attempts.length - 1) {
       meta.errors = (meta.errors || 0) + 1
@@ -1471,6 +1496,7 @@ function registerRoutes(ctx, state, config) {
         meta.cfg = normalizeModelConfig({
           upstreams: body.upstreams ?? meta.cfg.upstreams,
           exclude: body.exclude ?? meta.cfg.exclude,
+          has: body.has ?? meta.cfg.has,
           pinMode: body.pinMode ?? meta.cfg.pinMode,
           sort: body.sort ?? meta.cfg.sort,
         })

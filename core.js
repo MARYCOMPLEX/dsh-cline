@@ -30,6 +30,26 @@ export function normalizeSlugs(list) {
   return uniq(list).filter((value) => SLUG_RE.test(value))
 }
 
+// Capability filters the Vercel gateway validates in providerOptions.gateway.has.
+// The gateway rejects anything else with a 400 that names the allowed set, so the
+// panel and the persisted config accept exactly this vocabulary.
+export const HAS_ENUM = ['free', 'implicit-caching', 'reasoning', 'structured-output', 'tool-use', 'vision']
+const HAS_QUANT_RE = /^!?quantization:[a-z0-9._-]{1,24}$/
+
+/** Whether one value is a capability the gateway understands. */
+export function isHasValue(value) {
+  const text = String(value ?? '').trim().toLowerCase()
+  if (!text) return false
+  return HAS_ENUM.includes(text) || HAS_QUANT_RE.test(text)
+}
+
+/** Keep the capability filters the gateway will accept, in order, deduplicated. */
+export function normalizeHas(list) {
+  if (!Array.isArray(list)) return []
+  const lowered = list.map((value) => String(value ?? '').trim().toLowerCase()).filter(Boolean)
+  return [...new Set(lowered)].filter(isHasValue).slice(0, 8)
+}
+
 /**
  * Map a gateway-reported provider (often an OpenRouter display name) onto the
  * channel slug used by the routing API. "OpenInference" -> "open-inference".
@@ -163,6 +183,7 @@ export function classifyUpstreamError(message) {
 export function buildAttempts(cfg = {}) {
   const exclude = normalizeSlugs(cfg.exclude)
   const listed = normalizeSlugs(cfg.upstreams).filter((upstream) => !exclude.includes(upstream))
+  const hasList = normalizeHas(cfg.has)
   const mode = cfg.pinMode || (listed.length ? 'strict' : 'auto')
   const strict = mode !== 'preferred'
   const sort = cfg.sort || null
@@ -172,10 +193,11 @@ export function buildAttempts(cfg = {}) {
       strict,
       orderRest: strict ? [] : listed.filter((_, other) => other !== index),
       excludeList: exclude,
+      hasList,
       sort,
     }))
   }
-  return [{ upstream: null, strict, orderRest: [], excludeList: exclude, sort }]
+  return [{ upstream: null, strict, orderRest: [], excludeList: exclude, hasList, sort }]
 }
 
 /**
@@ -184,7 +206,7 @@ export function buildAttempts(cfg = {}) {
  * whitelist (known channels minus excluded ones).
  * @param {object} body original chat-completions body.
  * @param {'planner'|'direct'|null} pipeline
- * @param {{upstream?:string|null,strict?:boolean,orderRest?:string[],excludeList?:string[],sort?:string|null}} attempt
+ * @param {{upstream?:string|null,strict?:boolean,orderRest?:string[],excludeList?:string[],hasList?:string[],sort?:string|null}} attempt
  * @param {string[]} known channels discovered for this model.
  */
 export function injectPrefs(body, pipeline, attempt = {}, known = []) {
@@ -192,8 +214,9 @@ export function injectPrefs(body, pipeline, attempt = {}, known = []) {
   const upstream = attempt.upstream || null
   const exclude = normalizeSlugs(attempt.excludeList).filter((value) => value !== upstream)
   const allowList = exclude.length ? normalizeSlugs(known).filter((value) => !exclude.includes(value)) : null
+  const hasList = normalizeHas(attempt.hasList)
   const sort = attempt.sort || null
-  if (!upstream && !sort && !(allowList && allowList.length)) return copy
+  if (!upstream && !sort && !hasList.length && !(allowList && allowList.length)) return copy
 
   const useVercel = pipeline === 'planner' || pipeline == null
   const useOpenRouter = pipeline === 'direct' || pipeline == null
@@ -209,6 +232,9 @@ export function injectPrefs(body, pipeline, attempt = {}, known = []) {
     } else if (allowList && allowList.length) {
       gateway.only = allowList
     }
+    // Capability filter: an intersection with only/order, so a conflicting pin
+    // is a hard 400 rather than a silent fallback.
+    if (hasList.length) gateway.has = hasList
     if (sort) gateway.sort = sort
     if (Object.keys(gateway).length) {
       const current = copy.providerOptions && typeof copy.providerOptions === 'object' ? copy.providerOptions : {}
@@ -218,6 +244,9 @@ export function injectPrefs(body, pipeline, attempt = {}, known = []) {
   }
 
   if (useOpenRouter) {
+    // OpenRouter has no capability filter; provider.require_parameters and
+    // provider.quantizations are the nearest equivalents but they do not map
+    // one-to-one, so `has` is only injected for the gateway pipeline.
     const provider = copy.provider && typeof copy.provider === 'object' ? { ...copy.provider } : {}
     if (upstream) {
       if (attempt.strict !== false) provider.only = [upstream]
@@ -307,6 +336,7 @@ export function normalizeModelConfig(input = {}) {
   return {
     upstreams,
     exclude,
+    has: normalizeHas(input.has),
     pinMode,
     sort: ['cost', 'ttft', 'tps'].includes(input.sort) ? input.sort : null,
   }

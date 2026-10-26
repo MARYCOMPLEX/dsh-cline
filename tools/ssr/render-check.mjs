@@ -89,7 +89,7 @@ const fixture = {
       { slug: 'fireworks', status: 'bad', note: 'invalid_request_error' },
       { slug: 'deepinfra', status: 'unknown' },
     ],
-    cfg: { upstreams: ['alibaba', 'baseten'], exclude: ['fireworks'], pinMode: 'preferred', sort: 'cost' },
+    cfg: { upstreams: ['alibaba', 'baseten'], exclude: ['fireworks'], has: ['vision'], pinMode: 'preferred', sort: 'cost' },
     last: { provider: 'alibaba', canonical: 'deepseek/deepseek-v4.1-flash-1017', at: Date.now(), ms: 812, status: 200, attempts: ['alibaba'], target: 'alibaba', error: null },
     history: [],
     requests: 12,
@@ -120,6 +120,10 @@ const checks = {
   lastActual: html.includes('最近实际'),
   tokenOnly: html.includes('--dsw-alias-label-primary') && !html.includes('#171a21'),
   summary: html.includes('dc-stat'),
+  hasChips: html.includes('dc-has-chip'),
+  hasActive: html.includes('dc-has-chip is-on'),
+  hasInput: html.includes('dc-has-input'),
+  hasLabel: html.includes('视觉'),
 }
 console.log(JSON.stringify(checks, null, 2))
 

@@ -6,6 +6,7 @@ import {
   extractError,
   harvestBody,
   injectPrefs,
+  normalizeHas,
   normalizeModelConfig,
   parseAvailableProviders,
   parseRouting,
@@ -220,4 +221,45 @@ test('summarize counts models, channels, and pinned rows', () => {
     b: { upstreams: [], cfg: { upstreams: [] }, errors: 1 },
   })
   assert.deepEqual(summary, { models: 2, channels: 2, pinned: 1, requests: 3, errors: 1 })
+})
+
+test('normalizeHas keeps only gateway capabilities, case-insensitively', () => {
+  assert.deepEqual(
+    normalizeHas(['vision', 'VISION', 'bogus', 'quantization:fp8', '!quantization:bf16']),
+    ['vision', 'quantization:fp8', '!quantization:bf16'],
+  )
+  assert.deepEqual(normalizeHas('vision'), [])
+  assert.deepEqual(normalizeHas(['free', 'free']), ['free'])
+})
+
+test('injectPrefs adds has next to only and can stand alone', () => {
+  const withOnly = injectPrefs({ model: 'm' }, 'planner', {
+    upstream: 'deepseek', strict: true, hasList: ['vision', 'implicit-caching'],
+  })
+  assert.deepEqual(withOnly.providerOptions.gateway, {
+    only: ['deepseek'], has: ['vision', 'implicit-caching'],
+  })
+
+  const alone = injectPrefs({ model: 'm' }, 'planner', { hasList: ['free'] })
+  assert.deepEqual(alone.providerOptions.gateway, { has: ['free'] })
+
+  const empty = injectPrefs({ model: 'm' }, 'planner', { hasList: ['nope'] })
+  assert.equal(empty.providerOptions, undefined)
+})
+
+test('has is a gateway-only field', () => {
+  const out = injectPrefs({ model: 'm' }, 'direct', { upstream: 'wafer', strict: true, hasList: ['vision'] })
+  assert.deepEqual(out.provider, { only: ['wafer'] })
+  assert.equal(out.providerOptions, undefined)
+})
+
+test('normalizeModelConfig keeps the capability filter', () => {
+  assert.deepEqual(normalizeModelConfig({ has: ['vision', 'nope'] }).has, ['vision'])
+  assert.deepEqual(normalizeModelConfig({}).has, [])
+})
+
+test('buildAttempts carries the capability filter into every attempt', () => {
+  const attempts = buildAttempts({ upstreams: ['a', 'b'], has: ['vision'], pinMode: 'preferred' })
+  assert.equal(attempts.length, 2)
+  for (const attempt of attempts) assert.deepEqual(attempt.hasList, ['vision'])
 })

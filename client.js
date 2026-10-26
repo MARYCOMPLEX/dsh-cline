@@ -134,6 +134,12 @@ window.__ModuleLoader__.load({
         sortCost: '最低成本',
         sortTtft: '最快首字',
         sortTps: '最高吞吐',
+        hasTitle: '能力过滤',
+        hasHint: '只让满足这些能力的渠道可路由：与钉住取交集，没有任何渠道满足时网关直接 400，不会顺切。',
+        hasNone: '未启用（网关自由选择）',
+        hasCustomPlaceholder: 'quantization:fp8 或 !quantization:bf16',
+        hasAdd: '添加',
+        hasClear: '清除',
         pinnedOrder: '钉住顺序',
         noPinned: '当前为自动模式，未钉住任何渠道。',
         noChannelPinned: '已选择该模式，但还没有钉住渠道；点下方渠道行的「钉住」。',
@@ -241,6 +247,12 @@ window.__ModuleLoader__.load({
         sortCost: 'Lowest cost',
         sortTtft: 'Fastest first token',
         sortTps: 'Highest throughput',
+        hasTitle: 'Capability filter',
+        hasHint: 'Route only to channels with these capabilities: it intersects with the pin, and an empty match is a hard 400 rather than a fallback.',
+        hasNone: 'Off (gateway decides)',
+        hasCustomPlaceholder: 'quantization:fp8 or !quantization:bf16',
+        hasAdd: 'Add',
+        hasClear: 'Clear',
         pinnedOrder: 'Pinned order',
         noPinned: 'Automatic mode: no channel is pinned.',
         noChannelPinned: 'The mode is selected but no channel is pinned yet; press Pin on a channel below.',
@@ -359,6 +371,15 @@ window.__ModuleLoader__.load({
 .dc-section-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}
 .dc-section-title{font-size:14px;font-weight:600}
 .dc-hint{color:var(--dc-text-3);font-size:12px}
+.dc-has{display:flex;flex-direction:column;gap:6px;margin:2px 0 10px}
+.dc-has-chipset{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.dc-has-chip{height:26px;padding:0 10px;border:1px solid var(--dc-border);border-radius:999px;background:var(--dc-surface);color:var(--dc-text-2);font:inherit;font-size:12px;cursor:pointer}
+.dc-has-chip:hover:not(:disabled){color:var(--dc-text);background:var(--dc-hover)}
+.dc-has-chip.is-on{border-color:var(--dc-link);background:var(--dc-active);color:var(--dc-text);font-weight:600}
+.dc-has-chip:disabled{opacity:.55;cursor:default}
+.dc-has-chip.is-custom{font-family:Consolas,"Cascadia Mono",monospace;font-size:11.5px}
+.dc-has-input{height:26px;min-width:210px;padding:0 8px;border:1px solid var(--dc-border);border-radius:7px;background:var(--dc-bg);color:var(--dc-text);font:inherit;font-size:12px}
+.dc-has-input:focus-visible{outline:2px solid var(--dc-link);outline-offset:1px}
 .dc-spacer{flex:1 1 auto}
 .dc-seg{display:inline-flex;gap:2px;padding:2px;border:1px solid var(--dc-border);border-radius:9px;background:var(--dc-surface)}
 .dc-seg button{height:26px;padding:0 11px;border:0;border-radius:7px;background:transparent;color:var(--dc-text-2);font:inherit;font-size:12px;cursor:pointer}
@@ -485,10 +506,22 @@ window.__ModuleLoader__.load({
       return {
         upstreams: Array.isArray(cfg.upstreams) ? cfg.upstreams : [],
         exclude: Array.isArray(cfg.exclude) ? cfg.exclude : [],
+        has: Array.isArray(cfg.has) ? cfg.has : [],
         pinMode: cfg.pinMode === 'preferred' ? 'preferred' : cfg.pinMode === 'auto' ? 'auto' : 'strict',
         sort: ['cost', 'ttft', 'tps'].includes(cfg.sort) ? cfg.sort : null,
       }
     }
+
+    // The capability vocabulary the gateway validates in providerOptions.gateway.has.
+    const HAS_OPTIONS = [
+      { value: 'vision', zh: '视觉', en: 'vision' },
+      { value: 'reasoning', zh: '推理', en: 'reasoning' },
+      { value: 'tool-use', zh: '工具调用', en: 'tool-use' },
+      { value: 'structured-output', zh: '结构化输出', en: 'structured' },
+      { value: 'implicit-caching', zh: '隐式缓存', en: 'caching' },
+      { value: 'free', zh: '免费', en: 'free' },
+    ]
+    const HAS_OPTION_VALUES = HAS_OPTIONS.map((option) => option.value)
 
     function fmtTime(value) {
       if (!value) return '—'
@@ -749,6 +782,7 @@ window.__ModuleLoader__.load({
       const [logTotal, setLogTotal] = React.useState(0)
       const [logOpen, setLogOpen] = React.useState(false)
       const [logFilter, setLogFilter] = React.useState('all')
+      const [hasDraft, setHasDraft] = React.useState('')
       const busyRef = React.useRef(null)
       const t = TEXT[lang]
 
@@ -950,6 +984,35 @@ window.__ModuleLoader__.load({
         save({ sort: value || null }, `${t.saved}: ${t.sort}`)
       }
 
+      const toggleHas = (value) => {
+        if (!current) return
+        const list = current.cfg.has.includes(value)
+          ? current.cfg.has.filter((item) => item !== value)
+          : [...current.cfg.has, value]
+        save({ has: list }, `${t.saved}: ${t.hasTitle}`)
+      }
+
+      const addHasCustom = () => {
+        if (!current) return
+        const text = String(hasDraft || '').trim().toLowerCase()
+        if (!text) return
+        if (!/^!?quantization:[a-z0-9._-]{1,24}$/.test(text) && !HAS_OPTION_VALUES.includes(text)) {
+          setNotice({ tone: 'bad', text: `${t.hasTitle}: ${t.hasCustomPlaceholder}` })
+          return
+        }
+        if (current.cfg.has.includes(text)) {
+          setHasDraft('')
+          return
+        }
+        save({ has: [...current.cfg.has, text] }, `${t.saved}: ${text}`)
+        setHasDraft('')
+      }
+
+      const clearHas = () => {
+        if (!current || current.cfg.has.length === 0) return
+        save({ has: [] }, `${t.saved}: ${t.hasTitle}`)
+      }
+
       const clearLogs = async () => {
         try {
           await api('/logs/clear', {})
@@ -1129,6 +1192,53 @@ window.__ModuleLoader__.load({
                     : null,
                 ),
                 h('div', { className: 'dc-hint', style: { marginBottom: 10 } }, modeHint),
+                h('div', { className: 'dc-has' },
+                  h('div', { className: 'dc-has-chipset' },
+                    h('span', { className: 'dc-label' }, t.hasTitle),
+                    HAS_OPTIONS.map((option) => h('button', {
+                      key: option.value,
+                      type: 'button',
+                      className: `dc-has-chip${cfg.has.includes(option.value) ? ' is-on' : ''}`,
+                      'aria-pressed': cfg.has.includes(option.value),
+                      disabled: !!busy,
+                      title: option.value,
+                      onClick: () => toggleHas(option.value),
+                    }, lang === 'zh' ? option.zh : option.en)),
+                    cfg.has.filter((value) => !HAS_OPTION_VALUES.includes(value)).map((value) => h('button', {
+                      key: value,
+                      type: 'button',
+                      className: 'dc-has-chip is-on is-custom',
+                      'aria-pressed': true,
+                      disabled: !!busy,
+                      title: `${t.remove}: ${value}`,
+                      onClick: () => toggleHas(value),
+                    }, `${value} ×`)),
+                    h('input', {
+                      className: 'dc-has-input',
+                      value: hasDraft,
+                      placeholder: t.hasCustomPlaceholder,
+                      disabled: !!busy,
+                      'aria-label': t.hasTitle,
+                      onChange: (event) => setHasDraft(event.target.value),
+                      onKeyDown: (event) => {
+                        if (event.key !== 'Enter') return
+                        event.preventDefault()
+                        addHasCustom()
+                      },
+                    }),
+                    h('button', {
+                      type: 'button', className: 'dc-btn dc-btn-sm',
+                      disabled: !!busy || !hasDraft.trim(), onClick: addHasCustom,
+                    }, t.hasAdd),
+                    cfg.has.length
+                      ? h('button', {
+                        type: 'button', className: 'dc-btn dc-btn-sm dc-btn-ghost',
+                        disabled: !!busy, onClick: clearHas,
+                      }, t.hasClear)
+                      : null,
+                  ),
+                  h('div', { className: 'dc-hint' }, cfg.has.length ? `${t.hasTitle}: ${cfg.has.join(' + ')} · ${t.hasHint}` : t.hasNone),
+                ),
                 channels.length === 0
                   ? h('div', { className: 'dc-empty' }, t.noChannels)
                   : h('div', { className: 'dc-list' }, ordered.map((channel) => h(ChannelRow, {

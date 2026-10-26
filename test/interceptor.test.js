@@ -255,3 +255,18 @@ test('an empty event-stream on the last attempt surfaces a normalized error', as
   const body = await response.json()
   assert.match(body.error.message, /empty stream/i)
 })
+test('an unsatisfiable has filter fails fast instead of trying every pin', async () => {
+  const meta = model({
+    upstreams: ['baseten', 'alibaba'],
+    cfg: { upstreams: ['baseten', 'alibaba'], exclude: [], has: ['free'], pinMode: 'strict', sort: null },
+  })
+  const { response, calls } = await withInterceptor(meta, () => globalThis.fetch(`${GATEWAY}/chat/completions`, chatInit(baseBody)), {
+    responses: [
+      jsonResponse({ error: { message: 'None of the providers considered satisfy the required has conditions: free. Providers considered: baseten.' } }, 400),
+      plannerResponse('alibaba'),
+    ],
+  })
+  assert.equal(response.status, 400)
+  assert.equal(calls.length, 1)
+  assert.deepEqual(calls[0].body.providerOptions.gateway, { only: ['baseten'], has: ['free'] })
+})
