@@ -286,10 +286,11 @@ pi-ai adapter → OpenAI SDK → globalThis.fetch
 ## 验证
 
 ```powershell
-node --test --experimental-test-isolation=none dsh-cline/test   # 58 个纯函数 / 拦截器单测
+node --test --experimental-test-isolation=none dsh-cline/test   # 59 个纯函数 / 拦截器单测
 node dsh-cline/tools/live-probe.mjs      # 实网：判管道、枚举、钉住、流式、direct 管道
 node dsh-cline/tools/live-interceptor.mjs [model] [a,b]  # 实网：走真实拦截链路
-node dsh-cline/tools/live-verify-region.mjs  # 实网：钉住 + 推理区域，回读 finalProvider
+node dsh-cline/tools/live-verify-region.mjs   # 实网：钉住 + 推理区域，回读 finalProvider
+node dsh-cline/tools/live-verify-harvest.mjs  # 实网：按区域枚举公开池渠道
 ```
 
 > 在沙箱里跑 `node --test` 需要 `--experimental-test-isolation=none`（测试运行器默认会 spawn 子进程，被文件沙箱拒绝）。

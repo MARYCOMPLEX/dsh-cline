@@ -74,6 +74,13 @@ test('parseAvailableProviders handles planner text and filters JSON fragments', 
   assert.deepEqual(parseAvailableProviders(text, 'planner'), ['alibaba', 'baseten', 'fireworks'])
 })
 
+test('parseAvailableProviders keeps the last channel of a public-pool error', () => {
+  // Shape measured on the gateway with inferenceRegion: the list is followed
+  // directly by the wrapping JSON, so `wafer` touches the closing quote.
+  const text = 'inference request failed: request failed with status 400: {"error":{"message":"No available providers match the \'only\' filter: __probe__. Available providers are: alibaba, baseten, deepseek, wafer","type":"invalid_request_error","param":{"modelId":"deepseek/deepseek-v4.1-flash-1017"}}}'
+  assert.deepEqual(parseAvailableProviders(text, 'planner'), ['alibaba', 'baseten', 'deepseek', 'wafer'])
+})
+
 test('parseAvailableProviders handles the direct JSON error string', () => {
   const text = '{"error":{"message":"no allowed providers","metadata":{"available_providers":["GMICloud","Baseten"]}}}'
   assert.deepEqual(parseAvailableProviders(text, 'direct'), ['GMICloud', 'Baseten'])

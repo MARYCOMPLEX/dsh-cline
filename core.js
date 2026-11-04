@@ -216,7 +216,10 @@ export function extractError(input) {
  */
 export function parseAvailableProviders(input, pipeline) {
   const text = typeof input === 'string' ? input : extractError(input)
-  const plannerText = /Available providers are:\s*([^.]+)/i.exec(text || '')
+  // The list may be followed by a period or by the JSON that wraps the message
+  // ("... wafer","type":"invalid_request_error"); stop at either, otherwise the
+  // last channel is glued to the quote and dropped by the slug filter.
+  const plannerText = /Available providers are:\s*([^."]+)/i.exec(text || '')
   const fromText = () => {
     if (!plannerText) return []
     return normalizeSlugs(plannerText[1].split(/,\s*/))
