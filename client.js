@@ -163,8 +163,8 @@ window.__ModuleLoader__.load({
         hostStale: 'Host 仍在运行旧版插件，新参数不会生效。请完全退出 DeepSeek Harness 再打开（刷新页面不够）。',
         editParams: '手动编辑参数',
         editParamsClose: '收起编辑',
-        editParamsHint: '这里写的内容会深合并进 providerOptions.gateway，同名键覆盖自动生成的字段；以后网关加新参数不用改插件。',
-        editParamsHintDirect: '这里写的内容会深合并进顶层 provider，同名键覆盖自动生成的字段。',
+        editParamsHint: '灰字是当前自动生成的结果；这里只写要覆盖或追加的字段，保存后会深合并进 providerOptions.gateway，同名键以手写为准。以后网关加新参数不用改插件。',
+        editParamsHintDirect: '灰字是当前自动生成的结果；这里只写要覆盖或追加的字段，保存后会深合并进顶层 provider，同名键以手写为准。',
         editParamsInvalid: 'JSON 解析失败',
         editParamsSaved: '手动参数已保存',
         editParamsEmpty: '留空或 {} 表示不追加参数',
@@ -302,8 +302,8 @@ window.__ModuleLoader__.load({
         hostStale: 'The Host is still running an older plugin build, so new parameters stay inactive. Quit DeepSeek Harness completely and reopen it (a page refresh is not enough).',
         editParams: 'Edit parameters',
         editParamsClose: 'Close editor',
-        editParamsHint: 'What you write here is deep-merged into providerOptions.gateway and wins over generated keys, so a new gateway field needs no plugin update.',
-        editParamsHintDirect: 'What you write here is deep-merged into the top-level provider and wins over generated keys.',
+        editParamsHint: 'The grey text is what is generated right now; write only the fields to override or add. They are deep-merged into providerOptions.gateway, and a hand-written key wins.',
+        editParamsHintDirect: 'The grey text is what is generated right now; write only the fields to override or add. They are deep-merged into the top-level provider, and a hand-written key wins.',
         editParamsInvalid: 'JSON parse failed',
         editParamsSaved: 'Manual parameters saved',
         editParamsEmpty: 'Empty or {} adds nothing',
@@ -1586,6 +1586,9 @@ window.__ModuleLoader__.load({
                       h('textarea', {
                         className: 'dc-json-input',
                         value: extrasEdit.text,
+                        // The generated block doubles as the placeholder so the
+                        // box is never mistaken for "no parameters set".
+                        placeholder: previewText,
                         spellCheck: false,
                         disabled: !!busy,
                         'aria-invalid': extrasEdit.error ? 'true' : 'false',
