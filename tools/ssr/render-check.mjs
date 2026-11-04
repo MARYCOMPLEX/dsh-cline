@@ -89,7 +89,15 @@ const fixture = {
       { slug: 'fireworks', status: 'bad', note: 'invalid_request_error' },
       { slug: 'deepinfra', status: 'unknown' },
     ],
-    cfg: { upstreams: ['alibaba', 'baseten'], exclude: ['fireworks'], has: ['vision'], pinMode: 'preferred', sort: 'cost' },
+    cfg: {
+      upstreams: ['alibaba', 'baseten'],
+      exclude: ['fireworks'],
+      has: ['vision'],
+      pinMode: 'preferred',
+      sort: 'cost',
+      region: { scope: 'zone', geoRegion: 'us' },
+      extras: { gateway: { sort: 'price' } },
+    },
     last: { provider: 'alibaba', canonical: 'deepseek/deepseek-v4.1-flash-1017', at: Date.now(), ms: 812, status: 200, attempts: ['alibaba'], target: 'alibaba', error: null },
     history: [],
     requests: 12,
@@ -125,6 +133,10 @@ const checks = {
   hasInput: html.includes('dc-has-input'),
   hasPreview: html.includes('dc-has-json'),
   hasLabel: html.includes('视觉'),
+  regionRow: html.includes('dc-region') && html.includes('推理区域') && html.includes('固定 zone'),
+  regionGeo: html.includes('dc-region-geo') && html.includes('value="us"'),
+  previewBlock: html.includes('dc-preview') && html.includes('请求将携带'),
+  editButton: html.includes('手动编辑参数'),
 }
 console.log(JSON.stringify(checks, null, 2))
 

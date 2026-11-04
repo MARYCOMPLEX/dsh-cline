@@ -87,10 +87,15 @@ function chatInit(body, extraHeaders = {}) {
 
 const baseBody = { model: 'cline-pass/deepseek-v4.1-flash-1017', messages: [{ role: 'user', content: 'hi' }] }
 
-test('planner strict injects providerOptions.gateway.only', async () => {
+test('planner strict injects providerOptions.gateway.only and the region', async () => {
   const meta = model({ cfg: { upstreams: ['alibaba'], exclude: [], pinMode: 'strict', sort: null } })
   const { calls } = await withInterceptor(meta, () => globalThis.fetch(`${GATEWAY}/chat/completions`, chatInit(baseBody)))
-  assert.deepEqual(calls[0].body.providerOptions, { gateway: { only: ['alibaba'] } })
+  assert.deepEqual(calls[0].body.providerOptions, {
+    gateway: {
+      only: ['alibaba'],
+      inferenceRegion: { scope: 'zone', geoRegion: 'us', providers: { alibaba: null } },
+    },
+  })
   assert.equal(calls[0].body.provider, undefined)
 })
 
@@ -268,5 +273,55 @@ test('an unsatisfiable has filter fails fast instead of trying every pin', async
   })
   assert.equal(response.status, 400)
   assert.equal(calls.length, 1)
-  assert.deepEqual(calls[0].body.providerOptions.gateway, { only: ['baseten'], has: ['free'] })
+  assert.deepEqual(calls[0].body.providerOptions.gateway, {
+    only: ['baseten'],
+    has: ['free'],
+    inferenceRegion: { scope: 'zone', geoRegion: 'us', providers: { baseten: null } },
+  })
+})
+
+test('a region no allowed provider serves fails fast as well', async () => {
+  const meta = model({
+    upstreams: ['baseten', 'alibaba'],
+    cfg: { upstreams: ['baseten', 'alibaba'], exclude: [], pinMode: 'strict', sort: null },
+  })
+  const { response, calls } = await withInterceptor(meta, () => globalThis.fetch(`${GATEWAY}/chat/completions`, chatInit(baseBody)), {
+    responses: [
+      jsonResponse({ error: { message: 'None of the providers considered for deepseek/x support the requested inference region. Providers considered: baseten (scope=zone, geoRegion=us).' } }, 500),
+      plannerResponse('alibaba'),
+    ],
+  })
+  assert.equal(response.status, 500)
+  assert.equal(calls.length, 1)
+})
+
+test('an off region keeps the legacy body', async () => {
+  const meta = model({
+    cfg: { upstreams: ['alibaba'], exclude: [], pinMode: 'strict', sort: null, region: { scope: 'off' } },
+  })
+  const { calls } = await withInterceptor(meta, () => globalThis.fetch(`${GATEWAY}/chat/completions`, chatInit(baseBody)))
+  assert.deepEqual(calls[0].body.providerOptions, { gateway: { only: ['alibaba'] } })
+})
+
+test('manual gateway extras reach the wire and win over generated fields', async () => {
+  const meta = model({
+    cfg: {
+      upstreams: ['alibaba'],
+      exclude: [],
+      pinMode: 'strict',
+      sort: null,
+      extras: { gateway: { only: ['deepseek'], sort: 'throughput' } },
+    },
+  })
+  const { calls } = await withInterceptor(meta, () => globalThis.fetch(`${GATEWAY}/chat/completions`, chatInit(baseBody)))
+  assert.deepEqual(calls[0].body.providerOptions.gateway.only, ['deepseek'])
+  assert.equal(calls[0].body.providerOptions.gateway.sort, 'throughput')
+  // The generated region stays unless the override replaces it.
+  assert.deepEqual(calls[0].body.providerOptions.gateway.inferenceRegion.providers, { alibaba: null })
+})
+
+test('automatic requests with no preferences stay byte-identical', async () => {
+  const meta = model({ cfg: { upstreams: [], exclude: [], pinMode: 'auto', sort: null } })
+  const { calls } = await withInterceptor(meta, () => globalThis.fetch(`${GATEWAY}/chat/completions`, chatInit(baseBody)))
+  assert.deepEqual(calls[0].body, baseBody)
 })

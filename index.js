@@ -16,6 +16,7 @@ import {
   extractError,
   harvestBody,
   injectPrefs,
+  isRoutingConflict,
   normalizeModelConfig,
   parseAvailableProviders,
   parseRouting,
@@ -30,7 +31,7 @@ import {
 } from './core.js'
 
 const PKG = 'dsh-cline'
-const VERSION = '1.6.1'
+const VERSION = '1.7.0'
 const API_PREFIX = '/dsh-cline'
 const OR_API = 'https://openrouter.ai/api/v1'
 
@@ -41,6 +42,7 @@ const diagnostics = {
   intercepted: 0,
   lastInterceptAt: null,
   lastInterceptError: null,
+  lastInjected: null,
   lastRouteAt: null,
   clientLogs: [],
 }
@@ -633,11 +635,6 @@ function tapResponse(response, modelId, state, config, started, trace, session =
     .catch(() => {})
 }
 
-/** Gateway refusal caused by an unsatisfiable or malformed `has` filter. */
-function isHasConflict(text) {
-  return /satisfy the required has conditions|has entries must be one of/i.test(String(text || ''))
-}
-
 function pushClineFailure(modelId, started, trace, status, error, session = null) {
   logBook.push({
     provider: 'cline',
@@ -786,6 +783,15 @@ async function proxyRequest(previous, request, bodyObject, state, config, ctx) {
   for (let index = 0; index < attempts.length; index += 1) {
     const attempt = attempts[index]
     const send = injectPrefs(bodyObject, meta.pipeline, attempt, meta.upstreams || [])
+    // The last body actually put on the wire, for /diag: "the pin did nothing"
+    // is otherwise indistinguishable from "the pin was never injected".
+    diagnostics.lastInjected = {
+      at: Date.now(),
+      pipeline: meta.pipeline || null,
+      gateway: send.providerOptions && send.providerOptions.gateway ? send.providerOptions.gateway : null,
+      provider: send.provider || null,
+      extras: attempt.extras && (attempt.extras.gateway || attempt.extras.provider) ? attempt.extras : null,
+    }
     const headers = new Headers(request.headers)
     headers.set('content-type', 'application/json')
     headers.delete('content-length')
@@ -894,9 +900,10 @@ async function proxyRequest(previous, request, bodyObject, state, config, ctx) {
     if (attempt.upstream) learnStatus(state, modelId, attempt.upstream, text)
     if (!attempt.upstream && (attempt.excludeList || []).length) learnAvailable(state, modelId, text)
 
-    // A capability filter that matches nothing fails identically on every
-    // channel, so retrying the next pinned one would only add latency.
-    if (isHasConflict(text)) {
+    // A routing conflict (capability filter, inference region, only list) fails
+    // identically on every channel, so retrying the next pinned one would only
+    // add latency.
+    if (isRoutingConflict(text)) {
       meta.errors = (meta.errors || 0) + 1
       state.record(modelId, {
         last: {
@@ -1038,8 +1045,8 @@ async function postJSON(config, key, body, timeoutMs) {
   )
 }
 
-async function harvestProviders(config, key, modelId, pipeline) {
-  const result = await postJSON(config, key, harvestBody(modelId, pipeline), 60000)
+async function harvestProviders(config, key, modelId, pipeline, region) {
+  const result = await postJSON(config, key, harvestBody(modelId, pipeline, region), 60000)
   const fromBody = parseAvailableProviders(result.json, pipeline)
   if (fromBody.length) return fromBody
   const text = result.text || extractError(result.json)
@@ -1096,7 +1103,10 @@ async function probeModel(ctx, state, config, modelId) {
 
   let harvest = []
   try {
-    harvest = await harvestProviders(config, key, modelId, routing.pipeline)
+    // Harvest with the model's own region setting: the public pool and the
+    // private contributor pool do not list the same channels, and a pin must be
+    // validated against the pool it will actually route through.
+    harvest = await harvestProviders(config, key, modelId, routing.pipeline, state.model(modelId).cfg.region)
   } catch {
     harvest = []
   }
@@ -1160,7 +1170,7 @@ async function validateModel(ctx, state, config, modelId) {
     const batch = list.slice(index, index + batchSize)
     await Promise.all(batch.map(async (upstream) => {
       const started = Date.now()
-      const result = await postJSON(config, key, pinBody(modelId, meta.pipeline, upstream), 60000)
+      const result = await postJSON(config, key, pinBody(modelId, meta.pipeline, upstream, meta.cfg.region), 60000)
       const message = extractError(result.json) || result.text || result.error || ''
       const success = !!(result.json?.choices || result.json?.data?.choices)
       const status = success ? 'ok' : classifyUpstreamError(message)
@@ -1466,6 +1476,7 @@ function registerRoutes(ctx, state, config) {
           intercepted: diagnostics.intercepted,
           lastInterceptAt: diagnostics.lastInterceptAt,
           lastInterceptError: diagnostics.lastInterceptError,
+          lastInjected: diagnostics.lastInjected,
           lastRouteAt: diagnostics.lastRouteAt,
           clientLogs: diagnostics.clientLogs,
           stateFile: state.file,
@@ -1499,6 +1510,8 @@ function registerRoutes(ctx, state, config) {
           has: body.has ?? meta.cfg.has,
           pinMode: body.pinMode ?? meta.cfg.pinMode,
           sort: body.sort ?? meta.cfg.sort,
+          region: body.region ?? meta.cfg.region,
+          extras: body.extras ?? meta.cfg.extras,
         })
         // The exact fields the interceptor would add, computed with the same
         // code path so the panel never shows a preview it would not send.
@@ -1526,6 +1539,8 @@ function registerRoutes(ctx, state, config) {
           has: body.has ?? meta.cfg.has,
           pinMode: body.pinMode ?? meta.cfg.pinMode,
           sort: body.sort ?? meta.cfg.sort,
+          region: body.region ?? meta.cfg.region,
+          extras: body.extras ?? meta.cfg.extras,
         })
         state.save()
         return sendJSON(response, 200, { ok: true, model: body.model, cfg: meta.cfg })
@@ -1555,8 +1570,11 @@ function registerRoutes(ctx, state, config) {
         const override = {}
         if (Array.isArray(body.upstreams)) override.upstreams = body.upstreams
         if (Array.isArray(body.exclude)) override.exclude = body.exclude
+        if (Array.isArray(body.has)) override.has = body.has
         if (body.pinMode) override.pinMode = body.pinMode
         if (body.sort !== undefined) override.sort = body.sort
+        if (body.region !== undefined) override.region = body.region
+        if (body.extras !== undefined) override.extras = body.extras
         return sendJSON(response, 200, await testModel(ctx, state, config, body.model, override))
       }
 

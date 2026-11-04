@@ -2,12 +2,16 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   buildAttempts,
+  buildInferenceRegion,
   classifyUpstreamError,
   extractError,
   harvestBody,
   injectPrefs,
+  isRoutingConflict,
+  normalizeExtras,
   normalizeHas,
   normalizeModelConfig,
+  normalizeRegion,
   parseAvailableProviders,
   parseRouting,
   parseSSEProvider,
@@ -88,13 +92,17 @@ test('parseAvailableProviders digs the nested JSON out of a direct error string'
   assert.deepEqual(parseAvailableProviders(body, 'direct'), ['wafer', 'baseten', 'z-ai'])
 })
 
-test('injectPrefs strict planner sets providerOptions.gateway.only', () => {
+test('injectPrefs strict planner sets providerOptions.gateway.only and the region', () => {
   const out = injectPrefs(
     { model: 'm', messages: [], providerOptions: { gateway: { sort: 'cost' } } },
     'planner',
     { upstream: 'alibaba', strict: true },
   )
-  assert.deepEqual(out.providerOptions, { gateway: { sort: 'cost', only: ['alibaba'] } })
+  assert.deepEqual(out.providerOptions.gateway, {
+    sort: 'cost',
+    only: ['alibaba'],
+    inferenceRegion: { scope: 'zone', geoRegion: 'us', providers: { alibaba: null } },
+  })
   assert.equal(out.provider, undefined)
 })
 
@@ -107,6 +115,12 @@ test('injectPrefs preferred planner sets order plus an exclude whitelist', () =>
   )
   assert.deepEqual(out.providerOptions.gateway.order, ['alibaba', 'baseten'])
   assert.deepEqual(out.providerOptions.gateway.only, ['alibaba', 'baseten', 'gmicloud'])
+  // Every provider the request may use has to be opted into the region.
+  assert.deepEqual(out.providerOptions.gateway.inferenceRegion, {
+    scope: 'zone',
+    geoRegion: 'us',
+    providers: { alibaba: null, baseten: null, gmicloud: null },
+  })
 })
 
 test('injectPrefs direct strict maps sort to OpenRouter vocabulary', () => {
@@ -167,6 +181,51 @@ test('pinBody picks the field family from the pipeline', () => {
   assert.deepEqual(harvestBody('m', 'planner').providerOptions.gateway.only, ['__probe__'])
   assert.deepEqual(harvestBody('m', 'direct').provider.only, ['__probe__'])
 })
+
+test('pin and harvest bodies carry the inference region when it is enabled', () => {
+  const region = { scope: 'zone', geoRegion: 'us' }
+  const pinned = pinBody('m', 'planner', 'deepseek', region)
+  assert.deepEqual(pinned.providerOptions.gateway, {
+    only: ['deepseek'],
+    inferenceRegion: { scope: 'zone', geoRegion: 'us', providers: { deepseek: null } },
+  })
+
+  const harvested = harvestBody('m', 'planner', region)
+  assert.deepEqual(harvested.providerOptions.gateway.inferenceRegion.providers, { __probe__: null })
+
+  // The direct pipeline is OpenRouter: no region field exists there.
+  const direct = pinBody('m', 'direct', 'wafer', region)
+  assert.deepEqual(direct.provider, { only: ['wafer'] })
+  assert.equal(direct.providerOptions, undefined)
+})
+
+test('normalizeRegion defaults to a US zone and rejects junk', () => {
+  assert.deepEqual(normalizeRegion(), { scope: 'zone', geoRegion: 'us' })
+  assert.deepEqual(normalizeRegion({ scope: 'off', geoRegion: 'eu' }), { scope: 'off', geoRegion: 'eu' })
+  assert.deepEqual(normalizeRegion({ scope: 'global', geoRegion: 'not a region!' }), { scope: 'zone', geoRegion: 'us' })
+  assert.deepEqual(normalizeRegion('zone'), { scope: 'zone', geoRegion: 'us' })
+})
+
+test('buildInferenceRegion only lists the providers a request may use', () => {
+  assert.deepEqual(buildInferenceRegion({}, ['a', 'b', 'a']), {
+    scope: 'zone', geoRegion: 'us', providers: { a: null, b: null },
+  })
+})
+
+test('normalizeExtras keeps plain objects and drops everything else', () => {
+  assert.deepEqual(normalizeExtras({ gateway: { a: 1 }, provider: { b: 2 } }), { gateway: { a: 1 }, provider: { b: 2 } })
+  assert.deepEqual(normalizeExtras({ gateway: [1, 2], provider: 'x' }), {})
+  assert.deepEqual(normalizeExtras({ gateway: { blob: 'x'.repeat(9000) } }), {})
+  assert.deepEqual(normalizeExtras(null), {})
+})
+
+test('isRoutingConflict spots the refusals that cannot succeed on retry', () => {
+  assert.equal(isRoutingConflict('None of the providers considered satisfy the required has conditions: free'), true)
+  assert.equal(isRoutingConflict('None of the providers considered for deepseek/x support the requested inference region'), true)
+  assert.equal(isRoutingConflict("No available providers match the 'only' filter: nope"), true)
+  assert.equal(isRoutingConflict('429 rate limited'), false)
+})
+
 
 test('classifyUpstreamError separates transient from unusable channels', () => {
   assert.equal(classifyUpstreamError('429 temporarily rate limited'), 'limited')
@@ -237,14 +296,69 @@ test('injectPrefs adds has next to only and can stand alone', () => {
     upstream: 'deepseek', strict: true, hasList: ['vision', 'implicit-caching'],
   })
   assert.deepEqual(withOnly.providerOptions.gateway, {
-    only: ['deepseek'], has: ['vision', 'implicit-caching'],
+    only: ['deepseek'],
+    has: ['vision', 'implicit-caching'],
+    inferenceRegion: { scope: 'zone', geoRegion: 'us', providers: { deepseek: null } },
   })
 
   const alone = injectPrefs({ model: 'm' }, 'planner', { hasList: ['free'] })
-  assert.deepEqual(alone.providerOptions.gateway, { has: ['free'] })
+  assert.deepEqual(alone.providerOptions.gateway, {
+    has: ['free'],
+    inferenceRegion: { scope: 'zone', geoRegion: 'us', providers: {} },
+  })
 
   const empty = injectPrefs({ model: 'm' }, 'planner', { hasList: ['nope'] })
   assert.equal(empty.providerOptions, undefined)
+})
+
+test('an off region keeps the legacy body so a pin can be sent without it', () => {
+  const out = injectPrefs({ model: 'm' }, 'planner', {
+    upstream: 'alibaba', strict: true, region: { scope: 'off' },
+  })
+  assert.deepEqual(out.providerOptions.gateway, { only: ['alibaba'] })
+})
+
+test('the region carries the configured geoRegion', () => {
+  const out = injectPrefs({ model: 'm' }, 'planner', {
+    upstream: 'alibaba', strict: true, region: { scope: 'zone', geoRegion: 'eu' },
+  })
+  assert.equal(out.providerOptions.gateway.inferenceRegion.geoRegion, 'eu')
+})
+
+test('automatic requests stay untouched, but an explicit override is sent', () => {
+  const body = { model: 'm', messages: [] }
+  assert.deepEqual(injectPrefs(body, 'planner', { region: { scope: 'zone' } }), body)
+
+  const overridden = injectPrefs(body, 'planner', { extras: { gateway: { sort: 'throughput' } } })
+  assert.deepEqual(overridden.providerOptions.gateway, { sort: 'throughput' })
+})
+
+test('manual extras are deep-merged over the generated gateway fields', () => {
+  const out = injectPrefs({ model: 'm' }, 'planner', {
+    upstream: 'alibaba',
+    strict: true,
+    region: { scope: 'zone', geoRegion: 'us' },
+    extras: {
+      gateway: {
+        only: ['deepseek'],
+        sort: 'throughput',
+        inferenceRegion: { providers: { deepseek: null, alibaba: null } },
+      },
+    },
+  })
+  const gateway = out.providerOptions.gateway
+  assert.deepEqual(gateway.only, ['deepseek'])
+  assert.equal(gateway.sort, 'throughput')
+  assert.deepEqual(gateway.inferenceRegion.providers, { deepseek: null, alibaba: null })
+})
+
+test('manual extras may target the direct pipeline provider block', () => {
+  const out = injectPrefs({ model: 'm' }, 'direct', {
+    upstream: 'wafer',
+    strict: true,
+    extras: { provider: { require_parameters: true } },
+  })
+  assert.deepEqual(out.provider, { only: ['wafer'], require_parameters: true })
 })
 
 test('has is a gateway-only field', () => {
@@ -258,8 +372,35 @@ test('normalizeModelConfig keeps the capability filter', () => {
   assert.deepEqual(normalizeModelConfig({}).has, [])
 })
 
+test('normalizeModelConfig persists the region and the manual override', () => {
+  const cfg = normalizeModelConfig({
+    region: { scope: 'off', geoRegion: 'eu' },
+    extras: { gateway: { sort: 'throughput' } },
+  })
+  assert.deepEqual(cfg.region, { scope: 'off', geoRegion: 'eu' })
+  assert.deepEqual(cfg.extras, { gateway: { sort: 'throughput' } })
+
+  const bare = normalizeModelConfig({})
+  assert.deepEqual(bare.region, { scope: 'zone', geoRegion: 'us' })
+  assert.deepEqual(bare.extras, {})
+})
+
 test('buildAttempts carries the capability filter into every attempt', () => {
   const attempts = buildAttempts({ upstreams: ['a', 'b'], has: ['vision'], pinMode: 'preferred' })
   assert.equal(attempts.length, 2)
   for (const attempt of attempts) assert.deepEqual(attempt.hasList, ['vision'])
+})
+
+test('buildAttempts carries the region and the manual override into every attempt', () => {
+  const attempts = buildAttempts({
+    upstreams: ['a', 'b'],
+    pinMode: 'strict',
+    region: { scope: 'zone', geoRegion: 'eu' },
+    extras: { gateway: { sort: 'throughput' } },
+  })
+  assert.equal(attempts.length, 2)
+  for (const attempt of attempts) {
+    assert.deepEqual(attempt.region, { scope: 'zone', geoRegion: 'eu' })
+    assert.deepEqual(attempt.extras, { gateway: { sort: 'throughput' } })
+  }
 })

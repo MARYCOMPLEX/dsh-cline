@@ -34,10 +34,23 @@ Cline Pass 的订阅模型（`cline-pass/*`）在 Cline 网关之后分成两条
 
 | 管道 | 实际后端 | 响应特征 | 钉住字段 |
 |---|---|---|---|
-| **planner** | Vercel AI Gateway | `choices[0].message.provider_metadata.gateway.routing` | `providerOptions.gateway.only / order / sort` |
+| **planner** | Vercel AI Gateway | `choices[0].message.provider_metadata.gateway.routing` | `providerOptions.gateway.only / order / sort / has / inferenceRegion` |
 | **direct** | OpenRouter | 顶层 `provider`（显示名）+ 真实 `model` | 顶层 `provider.only / order / sort` |
 
 顶层的 `provider.only` 对 planner 管道会被 Cline 丢弃，所以「换上游不生效」。本插件在 Harness 进程内拦截发往网关的 `chat/completions`，按模型所属管道注入正确的字段，再回读响应里的 `finalProvider`。
+
+**2026-11 起网关又多了一条规矩**：planner 管道在不带 `inferenceRegion` 时会把模型解析到 contributor 私有通道（`private/deepseek-v4p1-flash-1017-contributor`），在那里 `only` / `order` / `has` 全部被忽略——看起来就像「钉住失效」。带上
+
+```json
+"providerOptions": {
+  "gateway": {
+    "only": ["deepseek"],
+    "inferenceRegion": { "scope": "zone", "geoRegion": "us", "providers": { "deepseek": null } }
+  }
+}
+```
+
+之后，模型改走公开渠道池，`only` 才真正生效。插件现在会按钉住/过滤名单自动补上这一段（`providers` 就是本请求允许使用的渠道集合），面板里可以关掉，也可以改 `geoRegion`。
 
 ---
 
@@ -72,7 +85,7 @@ dsh plugin --profile desktop add github:MARYCOMPLEX/dsh-cline
 也可以锁定版本或分支：
 
 ```powershell
-dsh plugin --profile desktop add github:MARYCOMPLEX/dsh-cline#v1.6.0
+dsh plugin --profile desktop add github:MARYCOMPLEX/dsh-cline#v1.7.0
 ```
 
 更新到最新：
@@ -121,7 +134,16 @@ cordis.patch.yml / locale / icon.svg / README / LICENSE`，不含 `test` 与 `to
    注入的是 `providerOptions.gateway.has`，与 `only` / `order` **取交集**：钉住 deepseek 再要求"免费"，
    网关直接返回 400 `None of the providers considered ... satisfy the required has conditions`，
    插件对这种错误**不重试下一个钉住项**（结果必然相同），直接把错误返回。
-8. **测试钉住**：按当前配置真实跑一次，显示目标 vs 实际以及尝试序列。
+8. **推理区域（inferenceRegion）**：默认「固定 zone / `us`」。只要这次请求会注入任何路由字段（钉住、排除白名单、
+   能力过滤、排序），就会同时注入 `inferenceRegion`，把模型解析到公开渠道池，`only` 才会被执行；
+   `providers` 按本次允许的渠道自动生成（例如钉 deepseek 就是 `{"deepseek": null}`）。
+   选「关闭」则回到旧行为：只发 `only`，网关可能仍把它路由到 contributor 私有通道。
+   自动模式且没有其它路由字段时不注入任何东西，聊天请求保持原样。
+9. **手动编辑参数**：预览框右上角点「手动编辑参数」，可以把任意字段写进
+   `providerOptions.gateway`（direct 管道写进顶层 `provider`），保存后**深合并**到自动生成的字段之上，
+   同名键以手写为准。以后网关再加新参数，直接在这里写，不用改插件、不用等发版。
+   编辑期间上方预览实时跟随；JSON 写错会标红且不允许保存。
+10. **测试钉住**：按当前配置真实跑一次，显示目标 vs 实际以及尝试序列。
 
 聊天时插件自动记录：管道、实际渠道、规范模型、耗时、尝试序列（最近 50 条）。面板每 4 秒刷新一次，页面隐藏时暂停。
 
@@ -169,6 +191,18 @@ config:
 | `debug` | `false` | 打印拦截器日志 |
 
 每模型的钉住配置和观测结果存在 `$DSH_HOME/storages/dsh-cline.json`。**不存密钥、不存消息正文。**
+
+每模型配置（面板写入、也可直接改状态文件后刷新页面）：
+
+| 字段 | 默认 | 说明 |
+|---|---|---|
+| `pinMode` | `auto` | `auto` / `strict` / `preferred` |
+| `upstreams` | `[]` | 钉住的渠道，按顺序尝试 |
+| `exclude` | `[]` | 永不使用的渠道；换算成 `only` 白名单 |
+| `has` | `[]` | 能力过滤，写在 `gateway.has` |
+| `sort` | `null` | `cost` / `ttft` / `tps` |
+| `region` | `{scope:'zone', geoRegion:'us'}` | `scope: 'zone' \| 'off'`；`off` 时退回旧行为（只发 only/order） |
+| `extras` | `{}` | 手动参数，`{gateway?: {...}, provider?: {...}}`，深合并到最后、同名覆盖 |
 
 ---
 
@@ -218,11 +252,11 @@ config:
 | POST | `/dsh-cline/logs/clear` | 清空日志 |
 | GET | `/dsh-cline/diag` | 拦截器状态、网关请求计数、状态文件路径 |
 | GET | `/dsh-cline/history` | 最近 100 条 Cline 请求记录 |
-| POST | `/dsh-cline/config` | `{model, upstreams, exclude, has, pinMode, sort}` |
-| POST | `/dsh-cline/probe` | `{model}` → 管道 + 渠道清单 |
-| POST | `/dsh-cline/validate` | `{model}` → 全渠道可用性 |
+| POST | `/dsh-cline/config` | `{model, upstreams, exclude, has, pinMode, sort, region, extras}` |
+| POST | `/dsh-cline/probe` | `{model}` → 管道 + 渠道清单（按该模型的 region 设置枚举公开/私有池） |
+| POST | `/dsh-cline/validate` | `{model}` → 全渠道可用性（带上 region，和实发一致） |
 | POST | `/dsh-cline/test` | `{model}` → 目标 vs 实际 + 尝试序列 |
-| POST | `/dsh-cline/preview` | `{model, has?, upstreams?, pinMode?, sort?}` → 预览将注入的 `providerOptions` / `provider` |
+| POST | `/dsh-cline/preview` | `{model, has?, upstreams?, pinMode?, sort?, region?, extras?}` → 预览将注入的 `providerOptions` / `provider` |
 | POST | `/dsh-cline/enabled` | `{enabled}` |
 
 桌面版页面以 `file://` 加载，插件按 `globalThis.__DSH_TRANSPORT__.streamBaseUrl` 解析 Host 源；
@@ -248,22 +282,26 @@ pi-ai adapter → OpenAI SDK → globalThis.fetch
 - 探测请求带 `x-dsh-cline-internal: 1`，不会再次被拦截。
 
 ---
-
+ 
 ## 验证
 
 ```powershell
-node --test dsh-cline/test          # 50 个纯函数 / 拦截器 / 日志单测
-node dsh-cline/tools/live-probe.mjs # 实网：判管道、枚举、钉住、流式、direct 管道
+node --test --experimental-test-isolation=none dsh-cline/test   # 58 个纯函数 / 拦截器单测
+node dsh-cline/tools/live-probe.mjs      # 实网：判管道、枚举、钉住、流式、direct 管道
 node dsh-cline/tools/live-interceptor.mjs [model] [a,b]  # 实网：走真实拦截链路
+node dsh-cline/tools/live-verify-region.mjs  # 实网：钉住 + 推理区域，回读 finalProvider
 ```
 
-实网结果（2026-10，`cline-pass/deepseek-v4.1-flash-1017`）：
+> 在沙箱里跑 `node --test` 需要 `--experimental-test-isolation=none`（测试运行器默认会 spawn 子进程，被文件沙箱拒绝）。
 
-- 管道 `planner`，假上游枚举出 16 条渠道；
-- 钉 `alibaba` → 实际 `alibaba`；钉 `baseten`（当时限流）→ 明确 429；
-- `order=[baseten, alibaba]` → 实际落到 `alibaba`（网关侧回退）；
-- 流式请求同样能回读 `finalProvider`；
-- direct 管道样例 `cline-pass/glm-5.3-flash` 枚举出 30 条渠道。
+实网结果（2026-11，`cline-pass/deepseek-v4.1-flash-1017`）：
+
+- 管道 `planner`，假上游枚举出 18 条渠道（私有池）/ 23 条（公开池）；
+- 只发 `only=["deepseek"]` → 实际 `openai-compatible-private`（钉住被忽略，问题复现）；
+- `only=["deepseek"] + inferenceRegion(zone/us, providers.deepseek)` → 实际 `deepseek`，`canonicalSlug=deepseek/deepseek-v4.1-flash-1017`；
+- 钉 `alibaba` / `wafer` 同样命中；`has` 与 region 同时存在时仍然生效；
+- `scope:"global"` 或 `scope:"off"` 会退回私有通道，这就是开关保留的意义；
+- 流式请求同样能回读 `finalProvider`；direct 管道（OpenRouter）不受 region 影响。
 
 ---
 
@@ -271,11 +309,21 @@ node dsh-cline/tools/live-interceptor.mjs [model] [a,b]  # 实网：走真实拦
 
 - 依赖 Harness 进程内的 `globalThis.fetch`。若未来版本给 pi-ai 传了自定义 `fetch`，拦截器会失效（`/diag` 会显示未拦截，聊天不受影响）。
 - 渠道清单来自网关报错文本，属于未文档化行为，网关改文案会失败；此时面板会显示「还没有渠道清单」。
+- `inferenceRegion` 属于网关未文档化字段：`providers` 必须列出本次允许的渠道，否则网关报
+  `None of the providers considered ... support the requested inference region`；插件对这类错误不重试（必然同样失败）。
+- 公开池和私有池的渠道名单不同（公开池多出 `digitalocean`、`nebius`、`streamlake` 等）。开启 region 后请重新「探测渠道」，
+  否则钉住的可能是只存在于私有池的 slug，会直接 400。
+- `geoRegion` 写错（比如 `zz`）网关不报错、只是忽略，插件无法替你校验。
 - 共享池限流是瞬时的：`⏳限流` 过一会儿重新「校验」即可。
 - 探测/校验/测试会产生极小真实请求（每次约 $0.0002 量级）；**枚举渠道本身零 token**。
 - 管道归属由 Cline 侧决定，可能随时间变化，重新「探测渠道」即可刷新。
 
 ## 常见问题
+
+**钉住了但「最近实际」还是 openai-compatible-private？**
+1.6.1 及更早版本只发 `only`；2026-11 起网关需要 `inferenceRegion` 才执行它。升级到 1.7.0 后确认「推理区域」为「固定 zone」，
+   点一次「探测渠道」让渠道清单变成公开池，再「测试钉住」看目标/实际是否一致。
+   `GET /dsh-cline/diag` 里的 `lastInjected` 会显示**上一条真实请求**携带的 `providerOptions.gateway`，可直接核对。
 
 **面板显示「请求失败」或一直「加载中」？**
 桌面版的页面是 `file://`，插件按 `globalThis.__DSH_TRANSPORT__.streamBaseUrl` 解析 Host 源，Host 侧对

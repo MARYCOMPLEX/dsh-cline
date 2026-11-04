@@ -141,13 +141,28 @@ window.__ModuleLoader__.load({
         hasAdd: '添加',
         hasClear: '清除',
         hasSubtitle: '勾选后只让满足这些能力的渠道可路由；与钉住取交集',
-        hasPreview: '请求将携带',
-        hasDraftTag: '草稿，未保存',
-        pinIgnored: (target, actual) => `网关未遵守钉住：目标是 ${target}，实际是 ${actual}。这个模型的渠道池可能把请求路由到了 contributor 私有通道；加一个 has 能力条件通常能强制走公开池。`,
-        hasPreviewEmpty: '（当前配置不注入任何路由字段）',
-        hasPreviewAttempts: '次尝试，仅预览第一条',
+        previewTitle: '请求将携带',
+        previewDraft: '草稿，未保存',
+        pinIgnored: (target, actual) => `网关未遵守钉住：目标是 ${target}，实际是 ${actual}。请求很可能仍落在 contributor 私有通道——开启「推理区域」后网关才会执行钉住。`,
+        previewEmpty: '（当前配置不注入任何路由字段）',
+        previewAttempts: '次尝试，仅预览第一条',
         hasUnsaved: '有未保存的修改',
         hasSavedHint: '已与保存的配置一致',
+        regionTitle: '推理区域',
+        regionOff: '关闭',
+        regionZone: '固定 zone',
+        regionGeo: '地理区域',
+        regionHint: '网关先按区域解析模型：带上 inferenceRegion 后 only/order 才会被执行。关闭后请求可能落到 contributor 私有通道，钉住看起来像没生效。',
+        regionIdle: '自动模式且没有其它路由字段时不注入参数；钉住渠道或开启过滤后才生效。',
+        regionSaved: '推理区域已保存',
+        regionInvalid: '地理区域只能用小写字母、数字和连字符',
+        editParams: '手动编辑参数',
+        editParamsClose: '收起编辑',
+        editParamsHint: '这里写的内容会深合并进 providerOptions.gateway，同名键覆盖自动生成的字段；以后网关加新参数不用改插件。',
+        editParamsHintDirect: '这里写的内容会深合并进顶层 provider，同名键覆盖自动生成的字段。',
+        editParamsInvalid: 'JSON 解析失败',
+        editParamsSaved: '手动参数已保存',
+        editParamsEmpty: '留空或 {} 表示不追加参数',
         confirm: '保存',
         cancel: '取消',
         pinnedOrder: '钉住顺序',
@@ -264,13 +279,28 @@ window.__ModuleLoader__.load({
         hasAdd: 'Add',
         hasClear: 'Clear',
         hasSubtitle: 'Route only to channels with these capabilities; intersected with the pin',
-        hasPreview: 'The request will carry',
-        hasDraftTag: 'draft, not saved',
-        pinIgnored: (target, actual) => `The gateway ignored the pin: target ${target}, actual ${actual}. This model's pool may be routing to the contributor private route; adding a has capability filter usually forces the public pool.`,
-        hasPreviewEmpty: '(this config injects no routing fields)',
-        hasPreviewAttempts: 'attempts, showing the first',
+        previewTitle: 'The request will carry',
+        previewDraft: 'draft, not saved',
+        pinIgnored: (target, actual) => `The gateway ignored the pin: target ${target}, actual ${actual}. The request probably stayed on the contributor private route; enable the inference region so the gateway executes the pin.`,
+        previewEmpty: '(this config injects no routing fields)',
+        previewAttempts: 'attempts, showing the first',
         hasUnsaved: 'Unsaved changes',
         hasSavedHint: 'Matches the saved config',
+        regionTitle: 'Inference region',
+        regionOff: 'Off',
+        regionZone: 'Fixed zone',
+        regionGeo: 'Geo region',
+        regionHint: 'The gateway resolves the model by region first: only/order are executed only when inferenceRegion is present. With it off the request can land on the contributor private route, which looks like a pin that does nothing.',
+        regionIdle: 'In automatic mode with no other routing fields nothing is injected; a pin or filter turns it on.',
+        regionSaved: 'Inference region saved',
+        regionInvalid: 'Geo region uses lowercase letters, digits, and hyphens only',
+        editParams: 'Edit parameters',
+        editParamsClose: 'Close editor',
+        editParamsHint: 'What you write here is deep-merged into providerOptions.gateway and wins over generated keys, so a new gateway field needs no plugin update.',
+        editParamsHintDirect: 'What you write here is deep-merged into the top-level provider and wins over generated keys.',
+        editParamsInvalid: 'JSON parse failed',
+        editParamsSaved: 'Manual parameters saved',
+        editParamsEmpty: 'Empty or {} adds nothing',
         confirm: 'Save',
         cancel: 'Cancel',
         pinnedOrder: 'Pinned order',
@@ -404,6 +434,16 @@ window.__ModuleLoader__.load({
 .dc-has-input:focus-visible{outline:2px solid var(--dc-link);outline-offset:1px}
 .dc-has-preview{display:flex;flex-direction:column;gap:4px}
 .dc-has-preview-head{font-size:11.5px;color:var(--dc-text-3)}
+.dc-preview{display:flex;flex-direction:column;gap:6px;margin:0 0 12px;padding:12px;border:1px solid var(--dc-border);border-radius:10px;background:var(--dc-surface)}
+.dc-preview-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:11.5px;color:var(--dc-text-3)}
+.dc-tag{display:inline-flex;align-items:center;height:18px;padding:0 7px;border-radius:999px;background:color-mix(in srgb,var(--dc-warn) 16%,transparent);color:var(--dc-warn);font-size:10.5px}
+.dc-json-input{width:100%;min-height:104px;padding:8px 10px;border:1px solid var(--dc-border);border-radius:8px;background:var(--dc-bg);color:var(--dc-text);font-family:Consolas,"Cascadia Mono",monospace;font-size:11.5px;line-height:1.5;resize:vertical;tab-size:2}
+.dc-json-input:focus-visible{outline:2px solid var(--dc-link);outline-offset:1px}
+.dc-json-input[aria-invalid="true"]{border-color:var(--dc-error)}
+.dc-region{display:flex;flex-direction:column;gap:6px;margin:0 0 12px;padding:10px 12px;border:1px solid var(--dc-border);border-radius:10px;background:var(--dc-surface)}
+.dc-region-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.dc-region-label{font-weight:600;font-size:13px}
+.dc-region-geo{height:26px;width:88px;min-width:0;padding:0 8px;border:1px solid var(--dc-border);border-radius:7px;background:var(--dc-bg);color:var(--dc-text);font:inherit;font-size:12px;font-family:Consolas,"Cascadia Mono",monospace}
 .dc-has-json{margin:0;padding:10px 12px;border-radius:8px;background:var(--dc-bg);border:1px solid var(--dc-border);color:var(--dc-text-2);font-family:Consolas,"Cascadia Mono",monospace;font-size:11.5px;line-height:1.5;overflow-x:auto;white-space:pre}
 .dc-has-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .dc-spacer{flex:1 1 auto}
@@ -516,7 +556,7 @@ window.__ModuleLoader__.load({
         pipeline: null,
         canonicalSlug: null,
         upstreams: [],
-        cfg: { upstreams: [], exclude: [], pinMode: 'auto', sort: null },
+        cfg: normalizeCfg(),
         last: null,
         history: [],
         requests: 0,
@@ -529,12 +569,51 @@ window.__ModuleLoader__.load({
 
     function normalizeCfg(input) {
       const cfg = input && typeof input === 'object' ? input : {}
+      const region = cfg.region && typeof cfg.region === 'object' ? cfg.region : {}
+      const extras = cfg.extras && typeof cfg.extras === 'object' ? cfg.extras : {}
+      const plain = (value) => (value && typeof value === 'object' && !Array.isArray(value) ? value : {})
       return {
         upstreams: Array.isArray(cfg.upstreams) ? cfg.upstreams : [],
         exclude: Array.isArray(cfg.exclude) ? cfg.exclude : [],
         has: Array.isArray(cfg.has) ? cfg.has : [],
         pinMode: cfg.pinMode === 'preferred' ? 'preferred' : cfg.pinMode === 'auto' ? 'auto' : 'strict',
         sort: ['cost', 'ttft', 'tps'].includes(cfg.sort) ? cfg.sort : null,
+        region: {
+          scope: region.scope === 'off' ? 'off' : 'zone',
+          geoRegion: typeof region.geoRegion === 'string' && region.geoRegion ? region.geoRegion : 'us',
+        },
+        extras: { gateway: plain(extras.gateway), provider: plain(extras.provider) },
+      }
+    }
+
+    // The manual override of the pipeline's routing block: gateway for the
+    // planner route, top-level provider for OpenRouter.
+    function extrasBlock(model) {
+      const cfg = model ? model.cfg : normalizeCfg()
+      return model && model.pipeline === 'direct' ? cfg.extras.provider : cfg.extras.gateway
+    }
+
+    function extrasPath(model) {
+      return model && model.pipeline === 'direct' ? 'provider' : 'providerOptions.gateway'
+    }
+
+    function prettyJSON(value) {
+      const object = value && typeof value === 'object' && Object.keys(value).length ? value : {}
+      return JSON.stringify(object, null, 2)
+    }
+
+    /** Parse the textarea as a JSON object; an empty box means "no override". */
+    function parseJSONObject(text) {
+      const trimmed = String(text || '').trim()
+      if (!trimmed) return { ok: true, value: {} }
+      try {
+        const value = JSON.parse(trimmed)
+        if (!value || typeof value !== 'object' || Array.isArray(value)) {
+          return { ok: false, error: 'JSON object required' }
+        }
+        return { ok: true, value }
+      } catch (failure) {
+        return { ok: false, error: String(failure && failure.message ? failure.message : failure) }
       }
     }
 
@@ -818,6 +897,10 @@ window.__ModuleLoader__.load({
         return { enabled: seedHas.length > 0, values: [...seedHas], custom: '' }
       })
       const [preview, setPreview] = React.useState(null)
+      // The region input is committed on blur/Enter, so typing never fires a
+      // request per keystroke; the extras editor is a draft with live preview.
+      const [regionGeo, setRegionGeo] = React.useState('us')
+      const [extrasEdit, setExtrasEdit] = React.useState({ open: false, text: '{}', error: null })
       const busyRef = React.useRef(null)
       const t = TEXT[lang]
 
@@ -928,8 +1011,11 @@ window.__ModuleLoader__.load({
             model: current.id,
             upstreams: patch.upstreams !== undefined ? patch.upstreams : cfg.upstreams,
             exclude: patch.exclude !== undefined ? patch.exclude : cfg.exclude,
+            has: patch.has !== undefined ? patch.has : cfg.has,
             pinMode: patch.pinMode !== undefined ? patch.pinMode : cfg.pinMode,
             sort: patch.sort !== undefined ? patch.sort : cfg.sort,
+            region: patch.region !== undefined ? patch.region : cfg.region,
+            extras: patch.extras !== undefined ? patch.extras : cfg.extras,
           })
           await reload()
           if (successText) setNotice({ tone: 'ok', text: successText })
@@ -1055,6 +1141,59 @@ window.__ModuleLoader__.load({
         setHasEdit({ enabled: saved.length > 0, values: [...saved], custom: '' })
       }
 
+      // The region is applied by the Host before it resolves the model, so a
+      // pin only works when it is on. It is saved immediately (like the mode).
+      const setRegionScope = (scope) => {
+        if (!current || current.cfg.region.scope === scope) return
+        return save({ region: { ...current.cfg.region, scope } }, `${t.saved}: ${t.regionTitle}`)
+      }
+
+      const commitGeoRegion = () => {
+        if (!current) return
+        const next = String(regionGeo || '').trim().toLowerCase()
+        if (!next || next === current.cfg.region.geoRegion) {
+          setRegionGeo(current.cfg.region.geoRegion)
+          return
+        }
+        if (!/^[a-z0-9][a-z0-9-]{1,15}$/.test(next)) {
+          setNotice({ tone: 'bad', text: `${t.regionTitle}: ${t.regionInvalid}` })
+          setRegionGeo(current.cfg.region.geoRegion)
+          return
+        }
+        return save({ region: { ...current.cfg.region, geoRegion: next } }, `${t.saved}: ${t.regionTitle}`)
+      }
+
+      // The manual override is a draft too: the preview follows every keystroke,
+      // nothing is persisted until Save.
+      const toggleExtras = () => {
+        setExtrasEdit((prev) => prev.open
+          ? { ...prev, open: false }
+          : { open: true, text: prettyJSON(extrasBlock(current)), error: null })
+      }
+
+      const editExtras = (text) => {
+        const parsed = parseJSONObject(text)
+        setExtrasEdit({ open: true, text, error: parsed.ok ? null : parsed.error })
+      }
+
+      const saveExtras = () => {
+        if (!current) return
+        const parsed = parseJSONObject(extrasEdit.text)
+        if (!parsed.ok) {
+          setExtrasEdit((prev) => ({ ...prev, error: parsed.error }))
+          return
+        }
+        const key = current.pipeline === 'direct' ? 'provider' : 'gateway'
+        const next = { ...current.cfg.extras }
+        if (Object.keys(parsed.value).length) next[key] = parsed.value
+        else delete next[key]
+        return save({ extras: next }, `${t.saved}: ${t.editParams}`)
+      }
+
+      const resetExtrasDraft = () => {
+        setExtrasEdit((prev) => ({ ...prev, text: prettyJSON(extrasBlock(current)), error: null }))
+      }
+
       const clearLogs = async () => {
         try {
           await api('/logs/clear', {})
@@ -1099,23 +1238,68 @@ window.__ModuleLoader__.load({
         setHasEdit({ enabled: cfg.has.length > 0, values: [...cfg.has], custom: '' })
       }, [selectedId, savedHas])
 
+      const savedExtras = JSON.stringify(cfg.extras)
+      React.useEffect(() => {
+        setRegionGeo(cfg.region.geoRegion)
+      }, [selectedId, cfg.region.geoRegion])
+
+      // Seed the manual editor from the saved block; saving closes it again.
+      React.useEffect(() => {
+        setExtrasEdit({ open: false, text: prettyJSON(extrasBlock(current)), error: null })
+      }, [selectedId, savedExtras, current && current.pipeline])
+
+      const parsedExtras = parseJSONObject(extrasEdit.text)
+      const draftExtras = (() => {
+        if (!parsedExtras.ok) return cfg.extras
+        const key = current && current.pipeline === 'direct' ? 'provider' : 'gateway'
+        const next = { ...cfg.extras }
+        if (Object.keys(parsedExtras.value).length) next[key] = parsedExtras.value
+        else delete next[key]
+        return next
+      })()
+      const draftExtrasKey = JSON.stringify(draftExtras)
+
       // Preview: the Host computes it with the same code path the interceptor
       // uses, so what the panel shows is exactly what the request will carry.
       React.useEffect(() => {
         let alive = true
-        api('/preview', { model: selectedId, has: hasEdit.enabled ? hasEdit.values : [] })
-          .then((json) => { if (alive) setPreview(json) })
-          .catch(() => { if (alive) setPreview(null) })
-        return () => { alive = false }
-      }, [selectedId, hasEdit.enabled, hasEdit.values.join(','), cfg.upstreams.join(','), cfg.pinMode, cfg.sort])
+        const timer = setTimeout(() => {
+          api('/preview', {
+            model: selectedId,
+            has: hasEdit.enabled ? hasEdit.values : [],
+            region: cfg.region,
+            extras: draftExtras,
+          })
+            .then((json) => { if (alive) setPreview(json) })
+            .catch(() => { if (alive) setPreview(null) })
+        }, 220)
+        return () => {
+          alive = false
+          clearTimeout(timer)
+        }
+      }, [
+        selectedId,
+        hasEdit.enabled,
+        hasEdit.values.join(','),
+        cfg.upstreams.join(','),
+        cfg.pinMode,
+        cfg.sort,
+        cfg.region.scope,
+        cfg.region.geoRegion,
+        draftExtrasKey,
+      ])
 
       const previewAttempts = preview && Array.isArray(preview.attempts) ? preview.attempts : []
       const previewFirst = previewAttempts.length
         ? (previewAttempts[0].providerOptions || previewAttempts[0].provider || null)
         : null
-      const previewText = previewFirst ? JSON.stringify(previewFirst, null, 2) : t.hasPreviewEmpty
+      const previewText = previewFirst ? JSON.stringify(previewFirst, null, 2) : t.previewEmpty
       const draftHas = hasEdit.enabled ? hasEdit.values : []
       const hasDirty = JSON.stringify(draftHas) !== JSON.stringify(cfg.has)
+      const extrasDirty = parsedExtras.ok
+        ? JSON.stringify(parsedExtras.value) !== JSON.stringify(extrasBlock(current))
+        : true
+      const previewDirty = hasDirty || extrasDirty
 
       const resultOk = result && result.ok === true
       const resultTarget = result && Array.isArray(result.trace) && result.trace.length && result.trace[0].upstream
@@ -1315,12 +1499,6 @@ window.__ModuleLoader__.load({
                           type: 'button', className: 'dc-btn dc-btn-sm',
                           disabled: !!busy || !hasEdit.custom.trim(), onClick: addHasCustom,
                         }, t.hasAdd)),
-                      h('div', { className: 'dc-has-preview' },
-                        h('div', { className: 'dc-has-preview-head' }, hasDirty ? `${t.hasPreview} · ${t.hasDraftTag}` : t.hasPreview),
-                        h('pre', { className: 'dc-has-json' }, previewText),
-                        previewAttempts.length > 1
-                          ? h('div', { className: 'dc-hint' }, `${previewAttempts.length} ${t.hasPreviewAttempts}`)
-                          : null),
                       h('div', { className: 'dc-has-actions' },
                         h('button', {
                           type: 'button', className: 'dc-btn dc-btn-sm dc-btn-primary',
@@ -1333,6 +1511,78 @@ window.__ModuleLoader__.load({
                         h('span', { className: 'dc-hint' }, hasDirty ? t.hasUnsaved : t.hasSavedHint)))
                     : h('div', { className: 'dc-hint' }, t.hasNone),
                 ),
+                current && current.pipeline === 'direct' ? null : h('div', { className: 'dc-region' },
+                  h('div', { className: 'dc-region-head' },
+                    h('span', { className: 'dc-region-label' }, t.regionTitle),
+                    h('div', { className: 'dc-seg', role: 'group', 'aria-label': t.regionTitle },
+                      h('button', {
+                        type: 'button', 'aria-pressed': cfg.region.scope === 'off',
+                        disabled: !!busy, onClick: () => setRegionScope('off'),
+                      }, t.regionOff),
+                      h('button', {
+                        type: 'button', 'aria-pressed': cfg.region.scope === 'zone',
+                        disabled: !!busy, onClick: () => setRegionScope('zone'),
+                      }, t.regionZone)),
+                    cfg.region.scope === 'zone'
+                      ? h(React.Fragment, null,
+                        h('span', { className: 'dc-label' }, t.regionGeo),
+                        h('input', {
+                          className: 'dc-region-geo',
+                          value: regionGeo,
+                          disabled: !!busy,
+                          'aria-label': t.regionGeo,
+                          spellCheck: false,
+                          onChange: (event) => setRegionGeo(event.target.value),
+                          onBlur: commitGeoRegion,
+                          onKeyDown: (event) => {
+                            if (event.key !== 'Enter') return
+                            event.preventDefault()
+                            commitGeoRegion()
+                          },
+                        }))
+                      : null),
+                  h('div', { className: 'dc-hint' },
+                    cfg.region.scope === 'zone' && !cfg.upstreams.length && !cfg.has.length && !cfg.sort
+                      ? t.regionIdle
+                      : t.regionHint)),
+                h('div', { className: 'dc-preview' },
+                  h('div', { className: 'dc-preview-head' },
+                    h('span', null, previewDirty ? `${t.previewTitle} · ${t.previewDraft}` : t.previewTitle),
+                    h('span', { className: 'dc-spacer' }),
+                    h('button', {
+                      type: 'button', className: 'dc-btn dc-btn-sm dc-btn-ghost',
+                      disabled: !!busy, onClick: toggleExtras,
+                    }, extrasEdit.open ? t.editParamsClose : t.editParams)),
+                  extrasEdit.open
+                    ? h(React.Fragment, null,
+                      h('textarea', {
+                        className: 'dc-json-input',
+                        value: extrasEdit.text,
+                        spellCheck: false,
+                        disabled: !!busy,
+                        'aria-invalid': extrasEdit.error ? 'true' : 'false',
+                        'aria-label': t.editParams,
+                        onChange: (event) => editExtras(event.target.value),
+                      }),
+                      h('div', { className: 'dc-hint' },
+                        extrasEdit.error
+                          ? `${t.editParamsInvalid}: ${extrasEdit.error}`
+                          : `${extrasPath(current)} · ${current && current.pipeline === 'direct' ? t.editParamsHintDirect : t.editParamsHint}`),
+                      h('div', { className: 'dc-has-actions' },
+                        h('button', {
+                          type: 'button', className: 'dc-btn dc-btn-sm dc-btn-primary',
+                          disabled: !!busy || !extrasDirty || !!extrasEdit.error, onClick: saveExtras,
+                        }, t.confirm),
+                        h('button', {
+                          type: 'button', className: 'dc-btn dc-btn-sm dc-btn-ghost',
+                          disabled: !!busy || !extrasDirty, onClick: resetExtrasDraft,
+                        }, t.cancel),
+                        h('span', { className: 'dc-hint' }, extrasDirty ? t.hasUnsaved : t.hasSavedHint)))
+                    : null,
+                  h('pre', { className: 'dc-has-json' }, previewText),
+                  previewAttempts.length > 1
+                    ? h('div', { className: 'dc-hint' }, `${previewAttempts.length} ${t.previewAttempts}`)
+                    : null),
                 channels.length === 0
                   ? h('div', { className: 'dc-empty' }, t.noChannels)
                   : h('div', { className: 'dc-list' }, ordered.map((channel) => h(ChannelRow, {

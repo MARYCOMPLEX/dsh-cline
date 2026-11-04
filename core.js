@@ -12,6 +12,17 @@
 
 export const OR_SORT = { cost: 'price', ttft: 'latency', tps: 'throughput' }
 
+// Vercel AI Gateway inference-region routing. Measured on the Cline gateway in
+// 2026-11: `providerOptions.gateway.only` is silently dropped while the request
+// still resolves to the private contributor route. Adding an inferenceRegion
+// moves the model onto the public provider pool, and only then does only/order
+// take effect. `providers` is the opt-in map the gateway validates against, so
+// every channel a request allows must be listed there — otherwise the request
+// fails with "None of the providers considered ... support the requested
+// inference region".
+export const DEFAULT_GEO_REGION = 'us'
+const GEO_REGION_RE = /^[a-z0-9][a-z0-9-]{1,15}$/
+
 const SLUG_RE = /^[a-z0-9][a-z0-9._-]*$/i
 
 /** Unique, trimmed, non-empty strings, preserving order. */
@@ -48,6 +59,87 @@ export function normalizeHas(list) {
   if (!Array.isArray(list)) return []
   const lowered = list.map((value) => String(value ?? '').trim().toLowerCase()).filter(Boolean)
   return [...new Set(lowered)].filter(isHasValue).slice(0, 8)
+}
+
+/**
+ * Normalize the per-model inference-region setting.
+ * `off` keeps the legacy body (only/order are sent, the gateway may ignore
+ * them); `zone` injects `providerOptions.gateway.inferenceRegion` so the pin is
+ * actually executed on the public pool.
+ * @param {{scope?:string,geoRegion?:string}|string|undefined} input
+ */
+export function normalizeRegion(input) {
+  const raw = typeof input === 'string' ? { scope: input } : input && typeof input === 'object' ? input : {}
+  const scope = raw.scope === 'off' || raw.scope === 'none' ? 'off' : 'zone'
+  const candidate = String(raw.geoRegion ?? DEFAULT_GEO_REGION).trim().toLowerCase()
+  const geoRegion = GEO_REGION_RE.test(candidate) ? candidate : DEFAULT_GEO_REGION
+  return { scope, geoRegion }
+}
+
+/** Whether requests for this model should carry an inferenceRegion. */
+export function regionEnabled(region) {
+  return normalizeRegion(region).scope === 'zone'
+}
+
+/**
+ * Build the gateway's inferenceRegion object for one request.
+ * @param {{scope?:string,geoRegion?:string}} region normalized or raw setting.
+ * @param {string[]} providers channels the request is allowed to use.
+ */
+export function buildInferenceRegion(region, providers = []) {
+  const { geoRegion } = normalizeRegion(region)
+  const map = {}
+  for (const value of Array.isArray(providers) ? providers : []) {
+    const slug = String(value ?? '').trim()
+    // The discovery sentinel is not a slug but the gateway still validates it,
+    // so it is kept verbatim instead of being slug-filtered.
+    if (slug) map[slug] = null
+  }
+  return { scope: 'zone', geoRegion, providers: map }
+}
+
+/**
+ * Recursively merge a manual override over generated routing fields. Plain
+ * objects merge key by key; arrays and scalars replace the generated value, so
+ * a hand-written `only` list wins over the computed one.
+ */
+export function deepMerge(base, patch) {
+  if (patch === undefined) return base
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return patch
+  const out = base && typeof base === 'object' && !Array.isArray(base) ? { ...base } : {}
+  for (const [key, value] of Object.entries(patch)) out[key] = deepMerge(out[key], value)
+  return out
+}
+
+// A hand-written block is a convenience escape hatch, not a payload carrier.
+const EXTRAS_LIMIT = 8 * 1024
+
+/**
+ * Sanitize the per-model manual override. Only plain objects survive, and the
+ * whole block is capped so a typo cannot bloat the persisted state.
+ * @param {{gateway?:object,provider?:object}|undefined} input
+ */
+export function normalizeExtras(input) {
+  const raw = input && typeof input === 'object' ? input : {}
+  const pick = (value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+    try {
+      const copy = JSON.parse(JSON.stringify(value))
+      return copy && typeof copy === 'object' && !Array.isArray(copy) ? copy : null
+    } catch {
+      return null
+    }
+  }
+  const extras = {}
+  const gateway = pick(raw.gateway)
+  const provider = pick(raw.provider)
+  if (gateway) extras.gateway = gateway
+  if (provider) extras.provider = provider
+  try {
+    return JSON.stringify(extras).length <= EXTRAS_LIMIT ? extras : {}
+  } catch {
+    return {}
+  }
 }
 
 /**
@@ -187,6 +279,8 @@ export function buildAttempts(cfg = {}) {
   const mode = cfg.pinMode || (listed.length ? 'strict' : 'auto')
   const strict = mode !== 'preferred'
   const sort = cfg.sort || null
+  const region = normalizeRegion(cfg.region)
+  const extras = normalizeExtras(cfg.extras)
   if (mode !== 'auto' && listed.length) {
     return listed.map((upstream, index) => ({
       upstream,
@@ -195,18 +289,21 @@ export function buildAttempts(cfg = {}) {
       excludeList: exclude,
       hasList,
       sort,
+      region,
+      extras,
     }))
   }
-  return [{ upstream: null, strict, orderRest: [], excludeList: exclude, hasList, sort }]
+  return [{ upstream: null, strict, orderRest: [], excludeList: exclude, hasList, sort, region, extras }]
 }
 
 /**
  * Return a deep copy of one OpenAI chat body with routing preferences injected.
  * The gateway ignores exclude/ignore, so exclusion is expressed as an only
- * whitelist (known channels minus excluded ones).
+ * whitelist (known channels minus excluded ones). `attempt.extras` is merged
+ * last, which is how a new gateway field can be sent without a plugin update.
  * @param {object} body original chat-completions body.
  * @param {'planner'|'direct'|null} pipeline
- * @param {{upstream?:string|null,strict?:boolean,orderRest?:string[],excludeList?:string[],hasList?:string[],sort?:string|null}} attempt
+ * @param {{upstream?:string|null,strict?:boolean,orderRest?:string[],excludeList?:string[],hasList?:string[],sort?:string|null,region?:object,extras?:object}} attempt
  * @param {string[]} known channels discovered for this model.
  */
 export function injectPrefs(body, pipeline, attempt = {}, known = []) {
@@ -216,7 +313,8 @@ export function injectPrefs(body, pipeline, attempt = {}, known = []) {
   const allowList = exclude.length ? normalizeSlugs(known).filter((value) => !exclude.includes(value)) : null
   const hasList = normalizeHas(attempt.hasList)
   const sort = attempt.sort || null
-  if (!upstream && !sort && !hasList.length && !(allowList && allowList.length)) return copy
+  const region = normalizeRegion(attempt.region)
+  const extras = normalizeExtras(attempt.extras)
 
   const useVercel = pipeline === 'planner' || pipeline == null
   const useOpenRouter = pipeline === 'direct' || pipeline == null
@@ -236,17 +334,24 @@ export function injectPrefs(body, pipeline, attempt = {}, known = []) {
     // is a hard 400 rather than a silent fallback.
     if (hasList.length) gateway.has = hasList
     if (sort) gateway.sort = sort
-    if (Object.keys(gateway).length) {
+    // A pin without a region is resolved onto the private contributor route,
+    // where the gateway ignores only/order; the region is what makes the pin
+    // executable. Automatic requests with nothing else stay byte-identical.
+    if (Object.keys(gateway).length && region.scope === 'zone') {
+      gateway.inferenceRegion = buildInferenceRegion(region, [...(gateway.only || []), ...(gateway.order || [])])
+    }
+    const merged = extras.gateway ? deepMerge(gateway, extras.gateway) : gateway
+    if (Object.keys(merged).length) {
       const current = copy.providerOptions && typeof copy.providerOptions === 'object' ? copy.providerOptions : {}
       const currentGateway = current.gateway && typeof current.gateway === 'object' ? current.gateway : {}
-      copy.providerOptions = { ...current, gateway: { ...currentGateway, ...gateway } }
+      copy.providerOptions = { ...current, gateway: { ...currentGateway, ...merged } }
     }
   }
 
   if (useOpenRouter) {
-    // OpenRouter has no capability filter; provider.require_parameters and
-    // provider.quantizations are the nearest equivalents but they do not map
-    // one-to-one, so `has` is only injected for the gateway pipeline.
+    // OpenRouter has no capability filter or inference region; provider.require_parameters
+    // and provider.quantizations are the nearest equivalents but they do not map
+    // one-to-one, so `has` and `inferenceRegion` are only injected for the gateway pipeline.
     const provider = copy.provider && typeof copy.provider === 'object' ? { ...copy.provider } : {}
     if (upstream) {
       if (attempt.strict !== false) provider.only = [upstream]
@@ -258,20 +363,28 @@ export function injectPrefs(body, pipeline, attempt = {}, known = []) {
       provider.only = allowList
     }
     if (sort) provider.sort = OR_SORT[sort] || sort
-    if (Object.keys(provider).length) copy.provider = provider
+    const merged = extras.provider ? deepMerge(provider, extras.provider) : provider
+    if (Object.keys(merged).length) copy.provider = merged
   }
 
   return copy
 }
 
-/** Minimal pinning body used by discovery/validation probes. */
-export function pinBody(model, pipeline, upstream) {
+/**
+ * Minimal pinning body used by discovery/validation probes. The region is
+ * included when enabled so a validation probes the same route the pin uses.
+ */
+export function pinBody(model, pipeline, upstream, region) {
   const body = { model, messages: [{ role: 'user', content: 'hi' }], max_tokens: 16 }
-  if (pipeline === 'planner') body.providerOptions = { gateway: { only: [upstream] } }
-  else if (pipeline === 'direct') body.provider = { only: [upstream] }
+  const regionOn = regionEnabled(region)
+  if (pipeline === 'planner') {
+    body.providerOptions = { gateway: { only: [upstream] } }
+    if (regionOn) body.providerOptions.gateway.inferenceRegion = buildInferenceRegion(region, [upstream])
+  } else if (pipeline === 'direct') body.provider = { only: [upstream] }
   else {
     body.provider = { only: [upstream] }
     body.providerOptions = { gateway: { only: [upstream] } }
+    if (regionOn) body.providerOptions.gateway.inferenceRegion = buildInferenceRegion(region, [upstream])
   }
   return body
 }
@@ -281,11 +394,24 @@ export function probeBody(model) {
   return { model, messages: [{ role: 'user', content: 'Reply with the word OK' }], max_tokens: 256 }
 }
 
-/** Fake-upstream request: zero tokens because the router rejects it first. */
-export function harvestBody(model, pipeline) {
+/**
+ * Fake-upstream request: zero tokens because the router rejects it first.
+ * With a region the rejection happens on the public model, so the returned list
+ * is the pool the pin will actually be validated against.
+ */
+export function harvestBody(model, pipeline, region) {
   const body = { model, messages: [{ role: 'user', content: 'hi' }], max_tokens: 16 }
-  if (pipeline === 'planner') body.providerOptions = { gateway: { only: ['__probe__'] } }
-  else body.provider = { only: ['__probe__'] }
+  const regionOn = regionEnabled(region)
+  if (pipeline === 'planner') {
+    body.providerOptions = { gateway: { only: ['__probe__'] } }
+    if (regionOn) body.providerOptions.gateway.inferenceRegion = buildInferenceRegion(region, ['__probe__'])
+  } else if (pipeline === 'direct') {
+    body.provider = { only: ['__probe__'] }
+  } else {
+    body.provider = { only: ['__probe__'] }
+    body.providerOptions = { gateway: { only: ['__probe__'] } }
+    if (regionOn) body.providerOptions.gateway.inferenceRegion = buildInferenceRegion(region, ['__probe__'])
+  }
   return body
 }
 
@@ -339,7 +465,23 @@ export function normalizeModelConfig(input = {}) {
     has: normalizeHas(input.has),
     pinMode,
     sort: ['cost', 'ttft', 'tps'].includes(input.sort) ? input.sort : null,
+    region: normalizeRegion(input.region),
+    extras: normalizeExtras(input.extras),
   }
+}
+
+/**
+ * A routing conflict fails identically on every channel, so the interceptor
+ * must return the error instead of walking the rest of the pinned list.
+ * Covers an unsatisfiable capability filter, a region that none of the allowed
+ * providers serve, and an only list no known provider can satisfy.
+ * @param {unknown} text gateway error body or message.
+ */
+export function isRoutingConflict(text) {
+  const value = String(text || '')
+  return /satisfy the required has conditions|has entries must be one of/i.test(value)
+    || /support the requested inference region/i.test(value)
+    || /no available providers match the 'only' filter/i.test(value)
 }
 
 /** Summary counters for the panel header. */
