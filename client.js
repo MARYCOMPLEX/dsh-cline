@@ -73,6 +73,10 @@ window.__ModuleLoader__.load({
       document.head.appendChild(style)
     }
     const API = '/dsh-cline'
+    // Mirrors package.json. The Host and this bundle ship together, so a page
+    // refresh can load new client code while the Host still runs the old build;
+    // the panel compares them and says so instead of silently doing nothing.
+    const CLIENT_VERSION = '1.7.0'
 
     // The Desktop renderer may load the page from file:// and talk to the Host
     // over an absolute origin, so a relative path would resolve against the
@@ -153,9 +157,10 @@ window.__ModuleLoader__.load({
         regionZone: '固定 zone',
         regionGeo: '地理区域',
         regionHint: '网关先按区域解析模型：带上 inferenceRegion 后 only/order 才会被执行。关闭后请求可能落到 contributor 私有通道，钉住看起来像没生效。',
-        regionIdle: '自动模式且没有其它路由字段时不注入参数；钉住渠道或开启过滤后才生效。',
+        regionIdle: '没有钉住渠道、也没有其它路由字段时不会注入参数；钉一个渠道或开启过滤后才生效。',
         regionSaved: '推理区域已保存',
         regionInvalid: '地理区域只能用小写字母、数字和连字符',
+        hostStale: 'Host 仍在运行旧版插件，新参数不会生效。请完全退出 DeepSeek Harness 再打开（刷新页面不够）。',
         editParams: '手动编辑参数',
         editParamsClose: '收起编辑',
         editParamsHint: '这里写的内容会深合并进 providerOptions.gateway，同名键覆盖自动生成的字段；以后网关加新参数不用改插件。',
@@ -291,9 +296,10 @@ window.__ModuleLoader__.load({
         regionZone: 'Fixed zone',
         regionGeo: 'Geo region',
         regionHint: 'The gateway resolves the model by region first: only/order are executed only when inferenceRegion is present. With it off the request can land on the contributor private route, which looks like a pin that does nothing.',
-        regionIdle: 'In automatic mode with no other routing fields nothing is injected; a pin or filter turns it on.',
+        regionIdle: 'Nothing is injected while no channel is pinned and no other routing field is set; a pin or filter turns it on.',
         regionSaved: 'Inference region saved',
         regionInvalid: 'Geo region uses lowercase letters, digits, and hyphens only',
+        hostStale: 'The Host is still running an older plugin build, so new parameters stay inactive. Quit DeepSeek Harness completely and reopen it (a page refresh is not enough).',
         editParams: 'Edit parameters',
         editParamsClose: 'Close editor',
         editParamsHint: 'What you write here is deep-merged into providerOptions.gateway and wins over generated keys, so a new gateway field needs no plugin update.',
@@ -901,10 +907,22 @@ window.__ModuleLoader__.load({
       // request per keystroke; the extras editor is a draft with live preview.
       const [regionGeo, setRegionGeo] = React.useState('us')
       const [extrasEdit, setExtrasEdit] = React.useState({ open: false, text: '{}', error: null })
+      // The Host reports its build through /diag; when it lags this bundle the
+      // panel says so instead of showing a preview the Host cannot produce.
+      const [host, setHost] = React.useState(null)
       const busyRef = React.useRef(null)
       const t = TEXT[lang]
 
       React.useEffect(() => { busyRef.current = busy }, [busy])
+
+      React.useEffect(() => {
+        let alive = true
+        fetch(apiURL('/diag'), { headers: { accept: 'application/json' } })
+          .then((response) => response.json())
+          .then((json) => { if (alive && json && typeof json.version === 'string') setHost(json) })
+          .catch(() => {})
+        return () => { alive = false }
+      }, [])
 
       const reload = React.useCallback(async () => {
         try {
@@ -980,7 +998,13 @@ window.__ModuleLoader__.load({
         return [...map.values()].sort((left, right) => left.id.localeCompare(right.id))
       }, [data])
 
-      const current = models.find((model) => model.id === selectedId) || models[0] || null
+      const current = models.find((model) => model.id === selectedId)
+        // Open on a model that actually has a saved pin rather than the first
+        // id alphabetically, which reads as "my config is gone".
+        || models.find((model) => model.cfg.upstreams.length || model.cfg.has.length)
+        || models[0]
+        || null
+      const hostStale = !!(host && host.version && host.version !== CLIENT_VERSION)
 
       React.useEffect(() => {
         if (current && current.id !== selectedId) setSelectedId(current.id)
@@ -1354,6 +1378,10 @@ window.__ModuleLoader__.load({
         data && data.interceptor && data.interceptor !== 'installed'
           ? h('div', { className: 'dc-notice dc-notice-warn' }, `${t.interceptorWarn}: ${data.interceptor}`)
           : null,
+        hostStale
+          ? h('div', { className: 'dc-notice dc-notice-bad' },
+            `${t.hostStale} (Host ${host.version} · Client ${CLIENT_VERSION})`)
+          : null,
         error
           ? h('div', { className: 'dc-notice dc-notice-bad' },
             `${t.requestFailed}: ${error}`,
@@ -1542,7 +1570,7 @@ window.__ModuleLoader__.load({
                         }))
                       : null),
                   h('div', { className: 'dc-hint' },
-                    cfg.region.scope === 'zone' && !cfg.upstreams.length && !cfg.has.length && !cfg.sort
+                    cfg.region.scope === 'zone' && !cfg.upstreams.length && !draftHas.length && !cfg.sort
                       ? t.regionIdle
                       : t.regionHint)),
                 h('div', { className: 'dc-preview' },
