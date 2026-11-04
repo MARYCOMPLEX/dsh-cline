@@ -163,11 +163,21 @@ const autoHtml = renderToString(React.createElement(registration.Component, {
   initialData: autoOnly,
   initialModel: fixture.models[0].id,
 }))
+const directHtml = renderToString(React.createElement(registration.Component, {
+  initialData: {
+    ...fixture,
+    models: [{ ...fixture.models[0], pipeline: 'direct', cfg: { ...fixture.models[0].cfg, region: { scope: 'zone', geoRegion: 'us' } } }],
+  },
+  initialModel: fixture.models[0].id,
+}))
 console.log(JSON.stringify({
   strictTabSelected: /aria-pressed="true"[^>]*>严格钉住/.test(strictHtml),
   strictHint: strictHtml.includes('还没有钉住渠道'),
   autoTabSelected: /aria-pressed="true"[^>]*>自动/.test(autoHtml),
   scopeHint: html.includes('仅拦截') && html.includes('cline-pass/'),
+  // OpenRouter has no inference region, so the row is planner-only. The class
+  // names live in the stylesheet either way, so check the rendered label.
+  directHidesRegion: !directHtml.includes('推理区域') && directHtml.includes('请求将携带'),
 }, null, 2))
 
 storage.set('dsh-cline.lang', 'en')
